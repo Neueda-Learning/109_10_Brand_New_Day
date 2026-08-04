@@ -146,7 +146,16 @@ public class JdbcPaymentRepository implements PaymentRepository {
 
     @Override
     public BigDecimal sumRefundedAmount(UUID originalPaymentId) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M3)");
+        String sql = """
+            SELECT COALESCE(SUM(amount), 0) FROM payments
+            WHERE original_payment_id = :originalPaymentId AND type = 'REFUND'
+            """;
+        BigDecimal sum = jdbcTemplate.queryForObject(
+                sql,
+                new MapSqlParameterSource("originalPaymentId", originalPaymentId.toString()),
+                BigDecimal.class
+        );
+        return sum == null ? BigDecimal.ZERO : sum;
     }
 
     private Payment mapRow(ResultSet rs, int rowNum) throws SQLException {
