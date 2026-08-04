@@ -10,6 +10,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -102,5 +107,112 @@ class JdbcPaymentRepositoryTest {
         refund.setCreatedAt(Instant.now());
         refund.setUpdatedAt(Instant.now());
         return refund;
+    }
+
+    // Distinct account names not used anywhere in the seeded data.sql, so these tests
+    // only ever see the rows they insert themselves.
+    private static final String SEARCH_TEST_SOURCE = "ACC-SEARCHTEST-SRC";
+    private static final String SEARCH_TEST_DEST = "ACC-SEARCHTEST-DST";
+
+    private Payment newSearchTestRow(PaymentStatus status, PaymentType type, Instant createdAt) {
+        Payment payment = new Payment();
+        payment.setId(UUID.randomUUID());
+        payment.setIdempotencyKey("search-test-idem-" + payment.getId());
+        payment.setSourceAccount(SEARCH_TEST_SOURCE);
+        payment.setDestinationAccount(SEARCH_TEST_DEST);
+        payment.setAmount(new BigDecimal("10.00"));
+        payment.setCurrency("INR");
+        payment.setStatus(status);
+        payment.setType(type);
+        payment.setCreatedAt(createdAt);
+        payment.setUpdatedAt(createdAt);
+        return payment;
+    }
+
+    @Test
+    void search_filterByStatusAndType_returnsOnlyMatchingRows() {
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.COMPLETED, PaymentType.PAYMENT, Instant.now()));
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.FAILED, PaymentType.PAYMENT, Instant.now()));
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.COMPLETED, PaymentType.REFUND, Instant.now()));
+
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("status", "COMPLETED");
+        filters.put("type", "PAYMENT");
+        filters.put("sourceAccount", SEARCH_TEST_SOURCE);
+
+        List<Payment> results = paymentRepository.search(filters, 0, 20);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).getStatus()).isEqualTo(PaymentStatus.COMPLETED);
+        assertThat(results.get(0).getType()).isEqualTo(PaymentType.PAYMENT);
+    }
+
+    @Test
+    void countSearch_matchesSizeOfSearchResultsForSameFilters() {
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, Instant.now()));
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, Instant.now()));
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.SENT, PaymentType.PAYMENT, Instant.now()));
+
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("status", "CREATED");
+        filters.put("sourceAccount", SEARCH_TEST_SOURCE);
+
+        long count = paymentRepository.countSearch(filters);
+
+        assertThat(count).isEqualTo(2L);
+    }
+
+    @Test
+    void search_dateRangeFilter_excludesRowsOutsideRange() {
+        Instant inRange = LocalDate.of(2026, 8, 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant beforeRange = LocalDate.of(2026, 7, 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant afterRange = LocalDate.of(2026, 9, 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, inRange));
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, beforeRange));
+        paymentRepository.insert(newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, afterRange));
+
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("sourceAccount", SEARCH_TEST_SOURCE);
+        filters.put("fromDate", LocalDate.of(2026, 7, 15));
+        filters.put("toDate", LocalDate.of(2026, 8, 15));
+
+        List<Payment> results = paymentRepository.search(filters, 0, 20);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).getCreatedAt()).isEqualTo(inRange);
+    }
+
+    @Test
+    void search_pagination_returnsCorrectPageAndOrdersNewestFirst() {
+        Instant now = Instant.now();
+        Payment oldest = newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, now.minusSeconds(20));
+        Payment middle = newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, now.minusSeconds(10));
+        Payment newest = newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, now);
+        paymentRepository.insert(oldest);
+        paymentRepository.insert(middle);
+        paymentRepository.insert(newest);
+
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("sourceAccount", SEARCH_TEST_SOURCE);
+
+        List<Payment> firstPage = paymentRepository.search(filters, 0, 2);
+        List<Payment> secondPage = paymentRepository.search(filters, 1, 2);
+
+        assertThat(firstPage).hasSize(2);
+        assertThat(firstPage.get(0).getId()).isEqualTo(newest.getId());
+        assertThat(firstPage.get(1).getId()).isEqualTo(middle.getId());
+        assertThat(secondPage).hasSize(1);
+        assertThat(secondPage.get(0).getId()).isEqualTo(oldest.getId());
+    }
+
+    @Test
+    void search_noFilters_doesNotThrowAndIncludesInsertedRow() {
+        Payment payment = newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, Instant.now());
+        paymentRepository.insert(payment);
+
+        List<Payment> results = paymentRepository.search(new LinkedHashMap<>(), 0, 1000);
+
+        assertThat(results).extracting(Payment::getId).contains(payment.getId());
     }
 }

@@ -35,20 +35,22 @@ Full detail in `spec.md` Section 9. Summary:
 | M3 — Idempotency, Errors, Refund | Tharan | Idempotency short-circuit, refund rules, exception handling | `GlobalExceptionHandler`, 4 exception classes, refund service/repo logic | `frontend-user/detail.html` |
 | M4 — Query API, Lifecycle UI, Design System, API Docs | Karuna | Search/filter/paginate, shared UI components, OpenAPI config | `PaymentQueryController`, `OpenApiConfig`, `frontend-shared/*` | `frontend-business/dashboard.html`, `frontend-user/history.html` |
 
-Current phase: **Phase 1 (backbone) — DONE for all modules.** Phase 2 (backend/frontend
-implementation) and Phase 3 (integration) are `NOT_STARTED` — see `spec.md` Section 2 for
-the live dashboard.
+Current phase: **Phase 2 (backend/frontend implementation) — DONE for M1-M4 on their
+respective branches** (M1/M2/M3 merged to `main`; M4 implemented and tested on
+`feature/m4-lifecycle-ui`, PR to `main` still pending). Phase 3 (cross-module
+integration validation) is `IN_PROGRESS` — see `spec.md` Section 2 for the live
+dashboard.
 
 ## 3. REST Endpoints
 
 | Endpoint | Method | Owner | Purpose | Status |
 |---|---|---|---|---|
-| `/api/payments` | POST | M1 (+M3 idempotency) | Create payment | NOT_IMPLEMENTED |
-| `/api/payments/{id}` | GET | M1 | Fetch payment by id | NOT_IMPLEMENTED |
-| `/api/payments` | GET | M4 | List/filter/search payments (paginated) | NOT_IMPLEMENTED |
-| `/api/payments/{id}/history` | GET | M2 | Full status history timeline | NOT_IMPLEMENTED |
-| `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | NOT_IMPLEMENTED |
-| `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | NOT_IMPLEMENTED |
+| `/api/payments` | POST | M1 (+M3 idempotency) | Create payment | TESTED |
+| `/api/payments/{id}` | GET | M1 | Fetch payment by id | TESTED |
+| `/api/payments` | GET | M4 | List/filter/search payments (paginated) | TESTED (pending merge to `main`) |
+| `/api/payments/{id}/history` | GET | M2 | Full status history timeline | TESTED |
+| `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | TESTED |
+| `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | TESTED |
 
 Full request/response JSON shapes and error codes: `spec.md` Section 10. All error
 responses use one shared `ErrorResponse` shape (timestamp, status, errorCode, message, path).
@@ -190,11 +192,13 @@ Per `spec.md` Section 15:
   states, and idempotency conflicts.
 - **Repository tests** — required for JDBC SQL behavior (`JdbcPaymentRepository`,
   `JdbcPaymentStatusHistoryRepository`), run against a real local MySQL instance.
-- Test dependency: `spring-boot-starter-test` (already in `pom.xml`).
+- Test dependency: `spring-boot-starter-test` (already in `pom.xml`); also
+  `spring-boot-webmvc-test` (test scope, added by M3 — see `spec.md` Section 6.2).
 - Environment prerequisite: MySQL running locally — standard command is
   `docker compose up -d` (see Section 13 below) before running integration/repository tests.
-- No tests exist yet — Phase 2 has not started (Section 2 dashboard shows all modules
-  `NOT_STARTED` for backend/frontend implementation).
+- 29 tests currently passing across `GlobalExceptionHandlerTest`,
+  `JdbcPaymentRepositoryTest`, and `PaymentServiceImplTest` (verified via `mvn test` on
+  `feature/m4-lifecycle-ui` after merging latest `main`).
 
 ## 12. GitHub Actions File for CI
 

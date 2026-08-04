@@ -33,15 +33,15 @@ agent) to see current project state at a glance.
 
 | Module | Owner | Phase 1 - Backbone | Phase 2 - Backend Impl | Phase 2 - Frontend Impl | Phase 3 - Integration | Notes |
 |---|---|---|---|---|---|---|
-| Shared setup (pom.xml, schema.sql, docker-compose, config) | Team | DONE | — | — | NOT_STARTED | Maven skeleton, `schema.sql`, `docker-compose.yml`, `CorsConfig`/`JdbcConfig`/`OpenApiConfig` all created and compiling |
-| Shared dataset (data.sql seed) | Team | DONE | — | — | NOT_STARTED | 491 payments / 1661 history rows generated via `scripts/generate_data_sql.py` — see Section 11.5 |
-| M1 - Creation & Validation | Poornima | DONE | NOT_STARTED | NOT_STARTED | NOT_STARTED | Controller/service/repository/dto skeletons + `index.html` scaffolded |
-| M2 - Status Engine & Audit Trail | Neha | DONE | NOT_STARTED | NOT_STARTED | NOT_STARTED | Transition/history stubs + `audit.html` scaffolded |
-| M3 - Idempotency, Errors, Refund | Tharan | DONE | NOT_STARTED | NOT_STARTED | NOT_STARTED | Refund stub, exception classes, `GlobalExceptionHandler` skeleton + `detail.html` scaffolded |
-| M4 - Query API, Lifecycle UI, Design System, API Docs | Karuna | DONE | NOT_STARTED | NOT_STARTED | NOT_STARTED | Query controller stub, `OpenApiConfig`, `design-tokens.css`, `lifecycle-timeline.js` shell, `dashboard.html`/`history.html` scaffolded |
+| Shared setup (pom.xml, schema.sql, docker-compose, config) | Team | DONE | — | — | IN_PROGRESS | Maven skeleton, `schema.sql`, `docker-compose.yml`, `CorsConfig`/`JdbcConfig`/`OpenApiConfig` all created and compiling |
+| Shared dataset (data.sql seed) | Team | DONE | — | — | DONE | 491 payments / 1661 history rows generated via `scripts/generate_data_sql.py` — see Section 11.5 |
+| M1 - Creation & Validation | Poornima | DONE | DONE | DONE | IN_PROGRESS | `POST /api/payments` + `GET /api/payments/{id}` implemented; `index.html`/`index.js` wired to real API (PR #1, merged) |
+| M2 - Status Engine & Audit Trail | Neha | DONE | DONE | DONE | IN_PROGRESS | `process`/`history` endpoints implemented; `audit.html`/`audit.js` wired to real API (PR #3, merged) |
+| M3 - Idempotency, Errors, Refund | Tharan | DONE | DONE | DONE | IN_PROGRESS | Idempotency short-circuit, refund rules, full `GlobalExceptionHandler` mapping implemented; `detail.html`/`detail.js` wired to real API (PR #2, merged) |
+| M4 - Query API, Lifecycle UI, Design System, API Docs | Karuna | DONE | DONE | DONE | IN_PROGRESS | `GET /api/payments` filter/pagination + `lifecycle-timeline.js`/`dashboard.html`/`history.html` implemented and unit-tested; on `feature/m4-lifecycle-ui`, not yet merged to `main` |
 
 Status values: `NOT_STARTED`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
-Overall project phase: **Phase 1 (Backbone Setup) — DONE. Ready to start Phase 2.**
+Overall project phase: **Phase 2 (Backend/Frontend Impl) — DONE for M1-M4 on their respective branches. Phase 3 (cross-module integration validation, e.g. end-to-end refund/process/query flows together, PR review, merge of `feature/m4-lifecycle-ui` into `main`) is IN_PROGRESS.**
 
 ## 3. Session Context Block (Optional — for AI session hygiene)
 
@@ -150,7 +150,8 @@ payment_status_history (
   to_status    VARCHAR,
   changed_at   TIMESTAMP,
   triggered_by VARCHAR,
-  note         VARCHAR NULL
+  note         VARCHAR NULL,
+  seq          BIGINT AUTO_INCREMENT UNIQUE  -- insertion-order tiebreaker, not exposed via API
 )
 ```
 
@@ -160,6 +161,10 @@ Schema invariants:
 - Status transitions must follow the rules in Section 8.
 - REFUND rows must reference `original_payment_id`.
 - No speculative fields — do not add columns without updating this section first.
+- `payment_status_history.seq` (added 2026-08-04) is an `AUTO_INCREMENT` tiebreaker used
+  only for `ORDER BY changed_at ASC, seq ASC` in `GET /api/payments/{id}/history` — since
+  `changed_at` is second-precision, multiple transitions landing in the same second would
+  otherwise sort non-deterministically/incorrectly. Never returned in any API response.
 - `amount` is stored with exactly 2 decimal places (rupees + paise). Reject/round-reject
   requests with more than 2 decimal places at validation time — never silently round.
 - `id` (and every other UUID column) is **always generated server-side**
@@ -547,12 +552,12 @@ tested, independent of the rest of its module.
 
 | API | Method | Owner | Purpose | Status |
 |---|---|---|---|---|
-| `/api/payments` | POST | M1 (+M3 idempotency) | Create payment | NOT_IMPLEMENTED |
-| `/api/payments/{id}` | GET | M1 | Fetch payment by id | NOT_IMPLEMENTED |
-| `/api/payments` | GET | M4 | List/filter/search payments | NOT_IMPLEMENTED |
-| `/api/payments/{id}/history` | GET | M2 | Get full status history timeline | NOT_IMPLEMENTED |
-| `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | NOT_IMPLEMENTED |
-| `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | NOT_IMPLEMENTED |
+| `/api/payments` | POST | M1 (+M3 idempotency) | Create payment | TESTED |
+| `/api/payments/{id}` | GET | M1 | Fetch payment by id | TESTED |
+| `/api/payments` | GET | M4 | List/filter/search payments | TESTED (on `feature/m4-lifecycle-ui`, not yet merged to `main`) |
+| `/api/payments/{id}/history` | GET | M2 | Get full status history timeline | TESTED |
+| `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | TESTED |
+| `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | TESTED |
 
 Endpoint status values: `NOT_IMPLEMENTED`, `IMPLEMENTED` (works, not yet tested),
 `TESTED` (has passing unit/repository tests per Section 15).
@@ -998,6 +1003,7 @@ history — keep entries short and factual.
 | 2026-08-04 | Phase 1 backbone complete. Backend: Maven skeleton (`pom.xml`, Java 25, Spring Boot 4.1.0, whitelisted deps only) builds cleanly with `mvn compile`; all model/dto/exception classes created; `PaymentController`/`PaymentQueryController`, `PaymentService(Impl)`, `PaymentRepository`/`JdbcPaymentRepository`, `PaymentStatusHistoryRepository`/`JdbcPaymentStatusHistoryRepository` scaffolded with stub methods throwing `UnsupportedOperationException`; `GlobalExceptionHandler` + all 4 exception classes created; `JdbcConfig`, `CorsConfig` (allows `localhost:5500`/`3000` dev origins), `OpenApiConfig` added; canonical `schema.sql` committed; `docker-compose.yml` added for local MySQL. Dataset: generated and committed `data.sql` (491 `payments` rows, 1661 `payment_status_history` rows) via a one-time, seeded/deterministic `scripts/generate_data_sql.py` (not part of the backend build), covering all required edge cases from Section 11.5 (all 5 statuses, full multi-row history chains, full + partial + multi-partial refunds incl. an exact-amount boundary case, unrefunded `COMPLETED` payments, FAILED payments per distinct error code, 40 reused accounts, uneven multi-week date spread, mixed `triggered_by`/`note` values). Frontend: `frontend-shared/design-tokens.css` and `lifecycle-timeline.js` shell created; `frontend-user/{index,history,detail}.html` and `frontend-business/{dashboard,audit}.html` scaffolded with static markup + page-specific stub JS files. Section 2 and Section 19 updated; ready to start Phase 2 module implementation. |
 | 2026-08-04 | Migrated backend to Spring Boot 4.1.0 (from 3.4.1) — confirmed `4.1.0` is the current latest stable `spring-boot-starter-parent` release. Bumped `springdoc-openapi-starter-webmvc-ui` from `2.6.0` to `3.1.0` (the springdoc line compatible with Spring Boot 4 / Jakarta EE 11, per springdoc's own compatibility matrix — the old `2.x` line targets Spring Boot 3 and is incompatible). All other whitelisted dependencies (`spring-boot-starter-web`/`jdbc`/`validation`, `mysql-connector-j`, `spring-boot-starter-test`) are version-managed by the parent BOM and needed no explicit changes; existing code already used `jakarta.validation.*` imports so no source changes were required. Re-verified with `mvn compile` — builds cleanly. Section 6.1 updated to reflect Spring Boot 4.x as the required major version. |
 | 2026-08-04 | M3 (Idempotency, Errors, Refund) implemented: `PaymentServiceImpl.createRefund()` (account swap, cumulative refund-amount cap, refund-of-refund ban, non-`COMPLETED` rejection), idempotent `createPayment()` duplicate-key short-circuit, `JdbcPaymentRepository.sumRefundedAmount()`, full `GlobalExceptionHandler` implementation (404/409/400/500 incl. the 200-with-existing-payment duplicate short-circuit), and `detail.html`/`detail.js` refund UI. Added test-scope dependency `org.springframework.boot:spring-boot-webmvc-test` (Section 6.2) — required because Spring Boot 4.1.0 relocated `@WebMvcTest`/`@AutoConfigureMockMvc` out of `spring-boot-test-autoconfigure`; not part of the original whitelist but needed for `GlobalExceptionHandlerTest`. 16 unit/MockMvc tests passing (`PaymentServiceImplTest`, `GlobalExceptionHandlerTest`); `JdbcPaymentRepositoryTest` written, pending a live MySQL run. |
+| 2026-08-04 | M1/M2/M3 merged to `main` via PR #1/#3/#2 respectively. `main` briefly had a broken build after PR #3's stash-pop conflict resolution left literal `<<<<<<<`/`=======`/`>>>>>>>` markers in `JdbcPaymentRepository`/`JdbcPaymentStatusHistoryRepository`/`PaymentServiceImpl` plus a stale local `toResponse()` call; fixed on `main` by PR #4 (`hotfix/main-compile-fix`, commit `b0c5129`). M4 (`feature/m4-lifecycle-ui`) implemented `GET /api/payments` search/filter/pagination end-to-end (`JdbcPaymentRepository.search`/`countSearch`, `PaymentServiceImpl.searchPayments` with enum validation), `lifecycle-timeline.js`, `dashboard.html`/`dashboard.js`, `history.html`/`history.js`, plus unit tests for search/pagination/filtering/validation — but this branch had not yet merged `main`'s PR #4 hotfix. Merged `origin/main` into `feature/m4-lifecycle-ui`: one trivial import-only conflict in `JdbcPaymentRepository.java` (this branch's full search implementation vs. main's stub), resolved by keeping this branch's imports. Re-verified after merge: `mvn compile` succeeds, all 29 tests pass (`GlobalExceptionHandlerTest`, `JdbcPaymentRepositoryTest`, `PaymentServiceImplTest`). Corrected Section 2 dashboard above, which had been stale (still showing Phase 2 as `NOT_STARTED` for all modules despite merged, implemented, tested work) — spec updates had lagged actual progress. Remaining work: merge `feature/m4-lifecycle-ui` into `main` via PR, then Phase 3 end-to-end integration validation across all endpoints together. |
 
 ## 19. Immediate Execution Checklist
 
@@ -1012,9 +1018,9 @@ Backbone checklist for this week:
 - [x] Update Section 2 (Status Dashboard) and Section 18 (Progress Log) as each item completes.
 
 Implementation checklist for next phase:
-- [ ] M1 build (create/get payment).
-- [ ] M2 build (transitions/history).
-- [ ] M3 build (idempotency/refund/errors).
-- [ ] M4 build (query/list, shared UI, API docs).
-- [ ] Integration validation across all endpoints.
+- [x] M1 build (create/get payment) — merged to `main` (PR #1).
+- [x] M2 build (transitions/history) — merged to `main` (PR #3).
+- [x] M3 build (idempotency/refund/errors) — merged to `main` (PR #2).
+- [x] M4 build (query/list, shared UI, API docs) — implemented and tested on `feature/m4-lifecycle-ui`; merge into `main` still pending (open a PR).
+- [ ] Integration validation across all endpoints (Phase 3, in progress).
 

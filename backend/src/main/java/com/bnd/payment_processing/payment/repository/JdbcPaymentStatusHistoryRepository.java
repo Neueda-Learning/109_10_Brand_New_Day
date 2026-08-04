@@ -53,7 +53,7 @@ public class JdbcPaymentStatusHistoryRepository implements PaymentStatusHistoryR
             SELECT id, payment_id, from_status, to_status, changed_at, triggered_by, note
             FROM payment_status_history
             WHERE payment_id = :paymentId
-            ORDER BY changed_at ASC
+            ORDER BY changed_at ASC, seq ASC
             """;
 
         List<PaymentStatusHistory> results = jdbcTemplate.query(
