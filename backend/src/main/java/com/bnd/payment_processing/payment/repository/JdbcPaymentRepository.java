@@ -11,6 +11,7 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -85,7 +86,20 @@ public class JdbcPaymentRepository implements PaymentRepository {
 
     @Override
     public int updateStatusIfCurrent(UUID id, String expectedCurrentStatus, String newStatus, String errorCode) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M2)");
+        String sql = """
+                UPDATE payments
+                SET status = :newStatus, error_code = :errorCode, updated_at = :updatedAt
+                WHERE id = :id AND status = :expectedCurrentStatus
+                """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("newStatus", newStatus)
+                .addValue("errorCode", errorCode)
+                .addValue("updatedAt", Timestamp.from(Instant.now()))
+                .addValue("id", id.toString())
+                .addValue("expectedCurrentStatus", expectedCurrentStatus);
+
+        return jdbcTemplate.update(sql, params);
     }
 
     @Override
