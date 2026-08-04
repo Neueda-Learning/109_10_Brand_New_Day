@@ -1,17 +1,9 @@
 package com.bnd.payment_processing.payment.service;
 
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
-import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
-import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
-import com.bnd.payment_processing.common.exception.PaymentNotFoundException;
->>>>>>> Stashed changes
-=======
 import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
 import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
+import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
 import com.bnd.payment_processing.common.exception.PaymentNotFoundException;
->>>>>>> 031eb5881d315aca5e4eb62bbd892853b23d27ad
 import com.bnd.payment_processing.payment.dto.CreatePaymentRequest;
 import com.bnd.payment_processing.payment.dto.PaymentHistoryEntry;
 import com.bnd.payment_processing.payment.dto.PaymentMapper;
@@ -144,7 +136,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         Payment updated = paymentRepository.findById(id)
                 .orElseThrow(() -> new PaymentNotFoundException(id));
-        return toResponse(updated);
+        return PaymentMapper.toResponse(updated);
     }
 
     private PaymentStatus getNextStatus(PaymentStatus currentStatus, ProcessRequest request) {
