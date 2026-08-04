@@ -11,6 +11,7 @@ C:\Users\Administrator\Documents\BND-PP\backend\src\main\java\com\bnd\payment_pr
 C:\Users\Administrator\Documents\BND-PP\backend\src\main\java\com\bnd\payment_processing\payment\dto\CreatePaymentRequest.java
 C:\Users\Administrator\Documents\BND-PP\backend\src\main\java\com\bnd\payment_processing\payment\dto\ErrorResponse.java
 C:\Users\Administrator\Documents\BND-PP\backend\src\main\java\com\bnd\payment_processing\payment\dto\PaymentHistoryEntry.java
+C:\Users\Administrator\Documents\BND-PP\backend\src\main\java\com\bnd\payment_processing\payment\dto\PaymentMapper.java
 C:\Users\Administrator\Documents\BND-PP\backend\src\main\java\com\bnd\payment_processing\payment\dto\PaymentResponse.java
 C:\Users\Administrator\Documents\BND-PP\backend\src\main\java\com\bnd\payment_processing\payment\dto\ProcessRequest.java
 C:\Users\Administrator\Documents\BND-PP\backend\src\main\java\com\bnd\payment_processing\payment\dto\RefundRequest.java

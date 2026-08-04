@@ -1,10 +1,17 @@
 package com.bnd.payment_processing.common.exception;
 
 import com.bnd.payment_processing.payment.dto.ErrorResponse;
+import com.bnd.payment_processing.payment.dto.PaymentMapper;
+import com.bnd.payment_processing.payment.dto.PaymentResponse;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.context.request.WebRequest;
+
+import java.time.Instant;
+import java.util.stream.Collectors;
 
 /**
  * Maps every exception thrown by the API to the single {@code ErrorResponse}
@@ -17,19 +24,46 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(PaymentNotFoundException.class)
     public ResponseEntity<ErrorResponse> handlePaymentNotFound(PaymentNotFoundException ex, WebRequest request) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M3)");
+        return buildError(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", ex.getMessage(), request);
     }
 
     @ExceptionHandler(InvalidStatusTransitionException.class)
     public ResponseEntity<ErrorResponse> handleInvalidStatusTransition(InvalidStatusTransitionException ex, WebRequest request) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M3)");
+        return buildError(HttpStatus.CONFLICT, "INVALID_STATUS_TRANSITION", ex.getMessage(), request);
     }
 
     @ExceptionHandler(InvalidRefundStateException.class)
     public ResponseEntity<ErrorResponse> handleInvalidRefundState(InvalidRefundStateException ex, WebRequest request) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M3)");
+        return buildError(HttpStatus.CONFLICT, "INVALID_REFUND_STATE", ex.getMessage(), request);
     }
 
-    // TODO (Phase 2, M3): handle MethodArgumentNotValidException / ConstraintViolationException
-    // -> 400 VALIDATION_ERROR, and any other uncaught exception -> 500.
+    /**
+     * Not a real error - a duplicate idempotency_key on POST /api/payments means
+     * "return the original resource" (spec.md Section 10.7), so this bypasses the
+     * ErrorResponse envelope entirely and returns the existing payment with 200 OK.
+     */
+    @ExceptionHandler(DuplicatePaymentException.class)
+    public ResponseEntity<PaymentResponse> handleDuplicatePayment(DuplicatePaymentException ex) {
+        return ResponseEntity.ok(PaymentMapper.toResponse(ex.getExistingPayment()));
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex, WebRequest request) {
+        String message = ex.getBindingResult().getFieldErrors().stream()
+                .map(fieldError -> fieldError.getField() + ": " + fieldError.getDefaultMessage())
+                .collect(Collectors.joining("; "));
+        return buildError(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", message, request);
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, WebRequest request) {
+        return buildError(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR",
+                "An unexpected error occurred", request);
+    }
+
+    private ResponseEntity<ErrorResponse> buildError(HttpStatus status, String errorCode, String message, WebRequest request) {
+        String path = request.getDescription(false).replace("uri=", "");
+        ErrorResponse body = new ErrorResponse(Instant.now(), status.value(), errorCode, message, path);
+        return ResponseEntity.status(status).body(body);
+    }
 }

@@ -7,6 +7,7 @@ import com.bnd.payment_processing.payment.dto.ProcessRequest;
 import com.bnd.payment_processing.payment.dto.RefundRequest;
 import com.bnd.payment_processing.payment.service.PaymentService;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,6 +31,7 @@ public class PaymentController {
     // --- M1 ---
 
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     public PaymentResponse createPayment(@Valid @RequestBody CreatePaymentRequest request) {
         return paymentService.createPayment(request);
     }
@@ -54,6 +56,7 @@ public class PaymentController {
     // --- M3 ---
 
     @PostMapping("/{id}/refund")
+    @ResponseStatus(HttpStatus.CREATED)
     public PaymentResponse createRefund(@PathVariable UUID id, @Valid @RequestBody RefundRequest request) {
         return paymentService.createRefund(id, request);
     }
