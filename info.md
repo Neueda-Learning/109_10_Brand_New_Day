@@ -292,6 +292,117 @@ branch protection + required PR reviews (Section 8) → containerize with a `Doc
 (Section 13) → optional CD step to push the built image somewhere. None of this is
 implemented yet; this section will need updating once any of it lands.
 
+## 18. System Architecture & State Transitions
+
+High-level architecture and lifecycle diagrams for the whole system (derived from
+`spec.md` Sections 7-10, 14).
+
+### 18.1 System Architecture
+
+```mermaid
+flowchart TB
+    subgraph Frontend User["frontend-user (static)"]
+        FU1[index.html<br/>+ index.js]
+        FU2[history.html<br/>+ history.js]
+        FU3[detail.html<br/>+ detail.js]
+    end
+
+    subgraph Frontend Business["frontend-business (static)"]
+        FB1[dashboard.html<br/>+ dashboard.js]
+        FB2[audit.html<br/>+ audit.js]
+    end
+
+    subgraph Shared["frontend-shared"]
+        S1[design-tokens.css]
+        S2[lifecycle-timeline.js]
+    end
+
+    FU2 --> S2
+    FB2 --> S2
+    FU1 & FU2 & FU3 & FB1 & FB2 --> S1
+
+    subgraph Backend["Spring Boot Backend (localhost:8080)"]
+        CORS[CorsConfig]
+        subgraph Controllers
+            PC[PaymentController<br/>POST /payments, GET /payments/id,<br/>POST /process, POST /refund]
+            PQC[PaymentQueryController<br/>GET /payments list/filter]
+        end
+        SVC[PaymentServiceImpl]
+        subgraph Repos
+            PR[JdbcPaymentRepository]
+            PSHR[JdbcPaymentStatusHistoryRepository]
+        end
+        GEH[GlobalExceptionHandler]
+        OAC[OpenApiConfig<br/>/swagger-ui.html]
+    end
+
+    FU1 & FU3 -- fetch --> PC
+    FU2 -- fetch --> PC
+    FB1 -- fetch --> PQC
+    FB2 -- fetch --> PC
+
+    PC --> SVC
+    PQC --> SVC
+    SVC --> PR
+    SVC --> PSHR
+    PC -.throws.-> GEH
+    PQC -.throws.-> GEH
+
+    subgraph DB["MySQL (Docker, localhost:3306)"]
+        T1[(payments)]
+        T2[(payment_status_history)]
+    end
+
+    PR --> T1
+    PSHR --> T2
+    T1 -. FK .- T2
+```
+
+Key points:
+- Two independent static frontends (`frontend-user`, `frontend-business`) call the same
+  backend REST API — no server-side rendering.
+- `frontend-shared` is dependency-only (CSS tokens + timeline JS component), consumed by
+  both apps, contains no page-specific logic.
+- Backend is layered Controller → Service → JDBC Repository, no ORM.
+- `GlobalExceptionHandler` is the single cross-cutting error-mapping layer for all
+  controllers, producing the shared `ErrorResponse` shape (spec Section 10.7).
+- `CorsConfig` is the only cross-origin bridge between the frontend static origin(s)
+  (`localhost:5500`/`3000`) and the backend (`localhost:8080`).
+
+### 18.2 Payment Lifecycle State Transitions
+
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED: POST /api/payments
+    CREATED --> VALIDATED: process (auto next step)
+    VALIDATED --> SENT: process (auto next step)
+    SENT --> COMPLETED: process (targetStatus=COMPLETED, default)
+    SENT --> FAILED: process (targetStatus=FAILED + errorCode required)
+    COMPLETED --> [*]
+    FAILED --> [*]
+
+    note right of COMPLETED
+        Only COMPLETED + type=PAYMENT
+        payments can be refunded
+        (POST /refund creates a new
+        type=REFUND row starting
+        its own CREATED state)
+    end note
+```
+
+### 18.3 Refund Sub-Flow
+
+A refund is a brand-new `payments` row (`type=REFUND`), not a mutation of the original,
+and it re-enters the same state machine independently (spec Section 8.1).
+
+```mermaid
+flowchart LR
+    A[Original PAYMENT<br/>status=COMPLETED] -- POST /refund<br/>amount, reason --> B{Validation<br/>- COMPLETED and type=PAYMENT?<br/>- amount greater than 0?<br/>- cumulative refunds less-or-equal original.amount?}
+    B -- fail --> E[409 InvalidRefundStateException]
+    B -- pass --> C[New REFUND row<br/>original_payment_id=A.id<br/>status=CREATED]
+    C --> D[Runs through same<br/>CREATED to VALIDATED to SENT to COMPLETED/FAILED<br/>via /process]
+```
+
 ---
 
 *Keep this file in sync with `spec.md` and `README.md` whenever the stack, endpoints, or
