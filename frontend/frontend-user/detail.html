@@ -25,6 +25,13 @@
       <p>Type: <span id="detail-type"></span></p>
 
       <button id="refund-btn" class="danger" hidden>Refund</button>
+      <div class="card" id="refund-form" hidden>
+        <label for="refund-amount">Refund Amount</label>
+        <input type="number" id="refund-amount" name="refund-amount" min="0.01" step="0.01">
+        <label for="refund-reason">Reason (optional)</label>
+        <input type="text" id="refund-reason" name="refund-reason">
+        <button id="submit-refund-btn" type="button">Submit Refund</button>
+      </div>
       <div id="refund-error" class="error-message" hidden></div>
     </div>
   </div>

@@ -1,10 +1,14 @@
 package com.bnd.payment_processing.payment.repository;
 
 import com.bnd.payment_processing.payment.model.Payment;
+import com.bnd.payment_processing.payment.model.PaymentStatus;
+import com.bnd.payment_processing.payment.model.PaymentType;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+<<<<<<< HEAD
 <<<<<<< Updated upstream
 =======
 import java.sql.ResultSet;
@@ -12,6 +16,11 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 >>>>>>> Stashed changes
+=======
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+>>>>>>> 031eb5881d315aca5e4eb62bbd892853b23d27ad
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,17 +41,53 @@ public class JdbcPaymentRepository implements PaymentRepository {
 
     @Override
     public Payment insert(Payment payment) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M1)");
+        String sql = """
+            INSERT INTO payments
+            (id, idempotency_key, source_account, destination_account, amount, currency,
+             status, error_code, type, original_payment_id, created_at, updated_at)
+            VALUES (:id, :idempotencyKey, :sourceAccount, :destinationAccount, :amount, :currency,
+             :status, :errorCode, :type, :originalPaymentId, :createdAt, :updatedAt)
+            """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("id", payment.getId().toString())
+                .addValue("idempotencyKey", payment.getIdempotencyKey())
+                .addValue("sourceAccount", payment.getSourceAccount())
+                .addValue("destinationAccount", payment.getDestinationAccount())
+                .addValue("amount", payment.getAmount())
+                .addValue("currency", payment.getCurrency())
+                .addValue("status", payment.getStatus().name())
+                .addValue("errorCode", payment.getErrorCode())
+                .addValue("type", payment.getType().name())
+                .addValue("originalPaymentId",
+                        payment.getOriginalPaymentId() == null ? null : payment.getOriginalPaymentId().toString())
+                .addValue("createdAt", Timestamp.from(payment.getCreatedAt()))
+                .addValue("updatedAt", Timestamp.from(payment.getUpdatedAt()));
+
+        jdbcTemplate.update(sql, params);
+        return payment;
     }
 
     @Override
     public Optional<Payment> findById(UUID id) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M1)");
+        String sql = "SELECT * FROM payments WHERE id = :id";
+        List<Payment> results = jdbcTemplate.query(
+                sql,
+                new MapSqlParameterSource("id", id.toString()),
+                this::mapRow
+        );
+        return results.stream().findFirst();
     }
 
     @Override
     public Optional<Payment> findByIdempotencyKey(String idempotencyKey) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M3)");
+        String sql = "SELECT * FROM payments WHERE idempotency_key = :key";
+        List<Payment> results = jdbcTemplate.query(
+                sql,
+                new MapSqlParameterSource("key", idempotencyKey),
+                this::mapRow
+        );
+        return results.stream().findFirst();
     }
 
     @Override
@@ -75,6 +120,33 @@ public class JdbcPaymentRepository implements PaymentRepository {
 
     @Override
     public BigDecimal sumRefundedAmount(UUID originalPaymentId) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M3)");
+        String sql = """
+            SELECT COALESCE(SUM(amount), 0) FROM payments
+            WHERE original_payment_id = :originalPaymentId AND type = 'REFUND'
+            """;
+        BigDecimal sum = jdbcTemplate.queryForObject(
+                sql,
+                new MapSqlParameterSource("originalPaymentId", originalPaymentId.toString()),
+                BigDecimal.class
+        );
+        return sum == null ? BigDecimal.ZERO : sum;
+    }
+
+    private Payment mapRow(ResultSet rs, int rowNum) throws SQLException {
+        Payment p = new Payment();
+        p.setId(UUID.fromString(rs.getString("id")));
+        p.setIdempotencyKey(rs.getString("idempotency_key"));
+        p.setSourceAccount(rs.getString("source_account"));
+        p.setDestinationAccount(rs.getString("destination_account"));
+        p.setAmount(rs.getBigDecimal("amount"));
+        p.setCurrency(rs.getString("currency"));
+        p.setStatus(PaymentStatus.valueOf(rs.getString("status")));
+        p.setErrorCode(rs.getString("error_code"));
+        p.setType(PaymentType.valueOf(rs.getString("type")));
+        String originalPaymentId = rs.getString("original_payment_id");
+        p.setOriginalPaymentId(originalPaymentId == null ? null : UUID.fromString(originalPaymentId));
+        p.setCreatedAt(rs.getTimestamp("created_at").toInstant());
+        p.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
+        return p;
     }
 }

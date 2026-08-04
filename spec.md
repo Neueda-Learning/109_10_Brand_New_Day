@@ -98,7 +98,7 @@ Out of scope:
 - Validation: spring-boot-starter-validation
 - Database driver: com.mysql:mysql-connector-j
 - API docs: springdoc-openapi
-- Testing: spring-boot-starter-test
+- Testing: spring-boot-starter-test, spring-boot-webmvc-test (test-scope only — see Section 6.2)
 
 ### 6.2 Minimal Dependency Whitelist
 
@@ -109,6 +109,10 @@ Allowed dependencies only:
 - com.mysql:mysql-connector-j
 - org.springdoc:springdoc-openapi-starter-webmvc-ui
 - org.springframework.boot:spring-boot-starter-test
+- org.springframework.boot:spring-boot-webmvc-test (test scope) — required as of Spring Boot
+  4.1.0, which moved `@WebMvcTest`/`@AutoConfigureMockMvc` out of
+  `spring-boot-test-autoconfigure` into this new artifact; not transitively pulled in by
+  `spring-boot-starter-test`. Added by M3 for `GlobalExceptionHandlerTest`.
 
 ### 6.3 Denylist
 
@@ -993,6 +997,7 @@ history — keep entries short and factual.
 | 2026-08-04 | v2.1: closed MVP gaps — added explicit Refund Mechanism rules (Section 8.1, incl. cumulative refund-amount check and refund-of-refund ban), the Process Outcome Rule for `SENT` transitions (Section 8.2, `ProcessRequest` with `targetStatus`/`errorCode`), Concurrency & Transaction rules (Section 8.3), schema precision (`DECIMAL(18,2)`, server-generated UUIDs, UTC timestamps), a `CorsConfig.java` task for local frontend/backend calls, per-endpoint implementation status tracking in Section 10, and plain-English "what it does" summaries for every API. |
 | 2026-08-04 | Phase 1 backbone complete. Backend: Maven skeleton (`pom.xml`, Java 25, Spring Boot 4.1.0, whitelisted deps only) builds cleanly with `mvn compile`; all model/dto/exception classes created; `PaymentController`/`PaymentQueryController`, `PaymentService(Impl)`, `PaymentRepository`/`JdbcPaymentRepository`, `PaymentStatusHistoryRepository`/`JdbcPaymentStatusHistoryRepository` scaffolded with stub methods throwing `UnsupportedOperationException`; `GlobalExceptionHandler` + all 4 exception classes created; `JdbcConfig`, `CorsConfig` (allows `localhost:5500`/`3000` dev origins), `OpenApiConfig` added; canonical `schema.sql` committed; `docker-compose.yml` added for local MySQL. Dataset: generated and committed `data.sql` (491 `payments` rows, 1661 `payment_status_history` rows) via a one-time, seeded/deterministic `scripts/generate_data_sql.py` (not part of the backend build), covering all required edge cases from Section 11.5 (all 5 statuses, full multi-row history chains, full + partial + multi-partial refunds incl. an exact-amount boundary case, unrefunded `COMPLETED` payments, FAILED payments per distinct error code, 40 reused accounts, uneven multi-week date spread, mixed `triggered_by`/`note` values). Frontend: `frontend-shared/design-tokens.css` and `lifecycle-timeline.js` shell created; `frontend-user/{index,history,detail}.html` and `frontend-business/{dashboard,audit}.html` scaffolded with static markup + page-specific stub JS files. Section 2 and Section 19 updated; ready to start Phase 2 module implementation. |
 | 2026-08-04 | Migrated backend to Spring Boot 4.1.0 (from 3.4.1) — confirmed `4.1.0` is the current latest stable `spring-boot-starter-parent` release. Bumped `springdoc-openapi-starter-webmvc-ui` from `2.6.0` to `3.1.0` (the springdoc line compatible with Spring Boot 4 / Jakarta EE 11, per springdoc's own compatibility matrix — the old `2.x` line targets Spring Boot 3 and is incompatible). All other whitelisted dependencies (`spring-boot-starter-web`/`jdbc`/`validation`, `mysql-connector-j`, `spring-boot-starter-test`) are version-managed by the parent BOM and needed no explicit changes; existing code already used `jakarta.validation.*` imports so no source changes were required. Re-verified with `mvn compile` — builds cleanly. Section 6.1 updated to reflect Spring Boot 4.x as the required major version. |
+| 2026-08-04 | M3 (Idempotency, Errors, Refund) implemented: `PaymentServiceImpl.createRefund()` (account swap, cumulative refund-amount cap, refund-of-refund ban, non-`COMPLETED` rejection), idempotent `createPayment()` duplicate-key short-circuit, `JdbcPaymentRepository.sumRefundedAmount()`, full `GlobalExceptionHandler` implementation (404/409/400/500 incl. the 200-with-existing-payment duplicate short-circuit), and `detail.html`/`detail.js` refund UI. Added test-scope dependency `org.springframework.boot:spring-boot-webmvc-test` (Section 6.2) — required because Spring Boot 4.1.0 relocated `@WebMvcTest`/`@AutoConfigureMockMvc` out of `spring-boot-test-autoconfigure`; not part of the original whitelist but needed for `GlobalExceptionHandlerTest`. 16 unit/MockMvc tests passing (`PaymentServiceImplTest`, `GlobalExceptionHandlerTest`); `JdbcPaymentRepositoryTest` written, pending a live MySQL run. |
 
 ## 19. Immediate Execution Checklist
 
