@@ -4,6 +4,12 @@ import com.bnd.payment_processing.payment.model.PaymentStatusHistory;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+<<<<<<< Updated upstream
+=======
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+>>>>>>> Stashed changes
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +33,34 @@ public class JdbcPaymentStatusHistoryRepository implements PaymentStatusHistoryR
 
     @Override
     public List<PaymentStatusHistory> findByPaymentIdOrderByChangedAtAsc(UUID paymentId) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M2)");
+        String sql = """
+            SELECT id, payment_id, from_status, to_status, changed_at, triggered_by, note
+            FROM payment_status_history
+            WHERE payment_id = :paymentId
+            ORDER BY changed_at ASC
+            """;
+
+        List<PaymentStatusHistory> results = jdbcTemplate.query(
+                sql,
+                new MapSqlParameterSource("paymentId", paymentId.toString()),
+                this::mapRow
+        );
+        return results;
+    }
+
+    private PaymentStatusHistory mapRow(ResultSet rs, int rowNum) throws SQLException {
+        PaymentStatusHistory h = new PaymentStatusHistory();
+        h.setId(UUID.fromString(rs.getString("id")));
+        h.setPaymentId(UUID.fromString(rs.getString("payment_id")));
+
+        String fromStatusStr = rs.getString("from_status");
+        h.setFromStatus(fromStatusStr == null ? null : PaymentStatus.valueOf(fromStatusStr));
+
+        h.setToStatus(PaymentStatus.valueOf(rs.getString("to_status")));
+        h.setChangedAt(rs.getTimestamp("changed_at").toInstant());
+        h.setTriggeredBy(rs.getString("triggered_by"));
+        h.setNote(rs.getString("note"));
+
+        return h;
     }
 }

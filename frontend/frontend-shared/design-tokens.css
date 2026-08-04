@@ -157,3 +157,91 @@ th, td {
   border-bottom: 1px solid var(--color-border);
   font-size: var(--font-size-sm);
 }
+
+/* Timeline component styles */
+.timeline {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.timeline-item {
+    display: flex;
+    margin-bottom: 2rem;
+    position: relative;
+}
+
+.timeline-marker {
+    flex-shrink: 0;
+    width: 100px;
+    text-align: center;
+    margin-right: 1rem;
+}
+
+.timeline-content {
+    flex-grow: 1;
+    padding: 1rem;
+    background-color: #f5f5f5;
+    border-left: 2px solid #ddd;
+    border-radius: 4px;
+}
+
+.timeline-transition {
+    margin: 0 0 0.5rem 0;
+    font-weight: bold;
+    font-size: 1rem;
+    color: #333;
+}
+
+.timeline-timestamp {
+    margin: 0.25rem 0;
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.timeline-note {
+    margin: 0.5rem 0;
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.timeline-triggered {
+    margin: 0.25rem 0;
+    font-size: 0.85rem;
+    color: #999;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-weight: bold;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+}
+
+.status-created {
+    background-color: #e3f2fd;
+    color: #1976d2;
+}
+
+.status-validated {
+    background-color: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.status-sent {
+    background-color: #fff3e0;
+    color: #f57c00;
+}
+
+.status-completed {
+    background-color: #e8f5e9;
+    color: #388e3c;
+}
+
+.status-failed {
+    background-color: #ffebee;
+    color: #d32f2f;
+}
