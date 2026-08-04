@@ -1,0 +1,159 @@
+/*
+ * Shared design tokens (spec.md Section 9 - M4).
+ * Every page in frontend-user/ and frontend-business/ must include this file
+ * for consistent colors, spacing, typography, and status-badge styling.
+ */
+
+:root {
+  /* Colors */
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-text: #1a1f26;
+  --color-text-muted: #5a6472;
+  --color-border: #d8dee6;
+  --color-primary: #2f6fed;
+  --color-primary-hover: #2559c2;
+  --color-danger: #d64545;
+  --color-danger-hover: #b83636;
+
+  /* Status badge colors - one per PaymentStatus */
+  --status-created-bg: #e8ecf3;
+  --status-created-fg: #4a5568;
+  --status-validated-bg: #e3f0ff;
+  --status-validated-fg: #2f6fed;
+  --status-sent-bg: #fff4e0;
+  --status-sent-fg: #b9770e;
+  --status-completed-bg: #e3f9e9;
+  --status-completed-fg: #1a7f43;
+  --status-failed-bg: #fdeaea;
+  --status-failed-fg: #c0392b;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+
+  /* Typography */
+  --font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.75rem;
+
+  --radius: 6px;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+a {
+  color: var(--color-primary);
+}
+
+h1, h2, h3 {
+  margin: 0 0 var(--space-3) 0;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-4);
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+label {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+input, select {
+  width: 100%;
+  padding: var(--space-2);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: var(--font-size-base);
+}
+
+button {
+  display: inline-block;
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--color-primary-hover);
+}
+
+button.danger {
+  background: var(--color-danger);
+}
+
+button.danger:hover {
+  background: var(--color-danger-hover);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.status-badge.CREATED { background: var(--status-created-bg); color: var(--status-created-fg); }
+.status-badge.VALIDATED { background: var(--status-validated-bg); color: var(--status-validated-fg); }
+.status-badge.SENT { background: var(--status-sent-bg); color: var(--status-sent-fg); }
+.status-badge.COMPLETED { background: var(--status-completed-bg); color: var(--status-completed-fg); }
+.status-badge.FAILED { background: var(--status-failed-bg); color: var(--status-failed-fg); }
+
+.error-message {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-3);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+}

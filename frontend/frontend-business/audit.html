@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audit Trail - Payment Processing</title>
+  <link rel="stylesheet" href="../frontend-shared/design-tokens.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Audit Trail</h1>
+
+    <div class="card">
+      <label for="paymentId">Payment ID</label>
+      <input type="text" id="paymentId" name="paymentId" placeholder="Enter a payment id">
+      <button id="load-audit-btn" type="button">Load Audit Trail</button>
+    </div>
+
+    <div class="card" id="timeline-card" hidden>
+      <h2>Timeline</h2>
+      <div id="timeline"></div>
+    </div>
+  </div>
+
+  <script src="../frontend-shared/lifecycle-timeline.js"></script>
+  <script src="audit.js"></script>
+</body>
+</html>
