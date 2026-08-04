@@ -11,7 +11,7 @@ The full build spec, API contracts, module ownership, and progress log live in
 
 ### Tech Stack
 
-- **Backend:** Java 25, Spring Boot 3.4.1, Maven, Spring JDBC (no JPA/Hibernate), MySQL
+- **Backend:** Java 25, Spring Boot 4.1.0, Maven, Spring JDBC (no JPA/Hibernate), MySQL
 - **Frontend:** Plain HTML/CSS/JS (no frameworks, no build tools)
 - **API docs:** springdoc-openapi (Swagger UI)
 
