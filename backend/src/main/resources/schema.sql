@@ -35,8 +35,11 @@ CREATE TABLE payment_status_history (
     changed_at   TIMESTAMP     NOT NULL,
     triggered_by VARCHAR(32)   NOT NULL,
     note         VARCHAR(255)  NULL,
+    -- Insertion-order tiebreaker: changed_at alone is second-precision and multiple
+    -- transitions can land in the same second, which breaks "oldest first" ordering.
+    seq          BIGINT        NOT NULL AUTO_INCREMENT UNIQUE,
     CONSTRAINT fk_history_payment
         FOREIGN KEY (payment_id) REFERENCES payments (id)
 );
 
-CREATE INDEX idx_history_payment_id ON payment_status_history (payment_id, changed_at);
+CREATE INDEX idx_history_payment_id ON payment_status_history (payment_id, changed_at, seq);
