@@ -157,3 +157,40 @@ th, td {
   border-bottom: 1px solid var(--color-border);
   font-size: var(--font-size-sm);
 }
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.timeline-item {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.timeline-item:last-child {
+  border-bottom: none;
+}
+
+.timeline-item-transition {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.timeline-item-meta {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.timeline-item-note {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-sm);
+}
+
+.timeline-empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}

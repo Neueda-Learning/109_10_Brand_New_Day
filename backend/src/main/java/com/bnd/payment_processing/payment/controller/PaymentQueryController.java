@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -33,6 +34,25 @@ public class PaymentQueryController {
             @RequestParam(required = false) LocalDate toDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M4)");
+        Map<String, Object> filters = new LinkedHashMap<>();
+        if (status != null) {
+            filters.put("status", status);
+        }
+        if (type != null) {
+            filters.put("type", type);
+        }
+        if (sourceAccount != null) {
+            filters.put("sourceAccount", sourceAccount);
+        }
+        if (destinationAccount != null) {
+            filters.put("destinationAccount", destinationAccount);
+        }
+        if (fromDate != null) {
+            filters.put("fromDate", fromDate);
+        }
+        if (toDate != null) {
+            filters.put("toDate", toDate);
+        }
+        return paymentService.searchPayments(filters, page, size);
     }
 }

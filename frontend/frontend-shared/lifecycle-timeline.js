@@ -12,6 +12,58 @@
  */
 
 function renderLifecycleTimeline(containerEl, historyEntries) {
-  // Phase 1 shell only - rendering logic implemented in Phase 2 (M4).
-  throw new Error("renderLifecycleTimeline() not implemented yet - Phase 2 (M4)");
+  containerEl.innerHTML = "";
+
+  if (!historyEntries || historyEntries.length === 0) {
+    var empty = document.createElement("p");
+    empty.className = "timeline-empty";
+    empty.textContent = "No history available.";
+    containerEl.appendChild(empty);
+    return;
+  }
+
+  var list = document.createElement("ul");
+  list.className = "timeline";
+
+  historyEntries.forEach(function (entry) {
+    var item = document.createElement("li");
+    item.className = "timeline-item";
+
+    var transition = document.createElement("div");
+    transition.className = "timeline-item-transition";
+    if (entry.fromStatus) {
+      transition.appendChild(makeStatusBadge(entry.fromStatus));
+      transition.appendChild(document.createTextNode(" \u2192 "));
+    }
+    transition.appendChild(makeStatusBadge(entry.toStatus));
+    item.appendChild(transition);
+
+    var meta = document.createElement("div");
+    meta.className = "timeline-item-meta";
+    meta.textContent = formatChangedAt(entry.changedAt) + " \u00B7 triggered by " + entry.triggeredBy;
+    item.appendChild(meta);
+
+    if (entry.note) {
+      var note = document.createElement("div");
+      note.className = "timeline-item-note";
+      note.textContent = entry.note;
+      item.appendChild(note);
+    }
+
+    list.appendChild(item);
+  });
+
+  containerEl.appendChild(list);
+}
+
+function makeStatusBadge(status) {
+  var badge = document.createElement("span");
+  badge.className = "status-badge " + status;
+  badge.textContent = status;
+  return badge;
+}
+
+function formatChangedAt(isoString) {
+  var date = new Date(isoString);
+  return isNaN(date.getTime()) ? isoString : date.toLocaleString();
 }
