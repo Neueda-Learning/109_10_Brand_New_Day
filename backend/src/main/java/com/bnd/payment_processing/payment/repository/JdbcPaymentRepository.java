@@ -8,9 +8,19 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+<<<<<<< HEAD
+<<<<<<< Updated upstream
+=======
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Instant;
+>>>>>>> Stashed changes
+=======
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+>>>>>>> 031eb5881d315aca5e4eb62bbd892853b23d27ad
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -82,7 +92,20 @@ public class JdbcPaymentRepository implements PaymentRepository {
 
     @Override
     public int updateStatusIfCurrent(UUID id, String expectedCurrentStatus, String newStatus, String errorCode) {
-        throw new UnsupportedOperationException("Not implemented yet - Phase 2 (M2)");
+        String sql = """
+                UPDATE payments
+                SET status = :newStatus, error_code = :errorCode, updated_at = :updatedAt
+                WHERE id = :id AND status = :expectedCurrentStatus
+                """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("newStatus", newStatus)
+                .addValue("errorCode", errorCode)
+                .addValue("updatedAt", Timestamp.from(Instant.now()))
+                .addValue("id", id.toString())
+                .addValue("expectedCurrentStatus", expectedCurrentStatus);
+
+        return jdbcTemplate.update(sql, params);
     }
 
     @Override
