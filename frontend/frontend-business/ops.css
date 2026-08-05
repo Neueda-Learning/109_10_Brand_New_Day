@@ -1,46 +1,76 @@
 /*
  * Page-specific styles for ops.html (M4 - unified business dashboard, Section 14.1).
- * Shared tokens/components (colors, spacing, badges, toggle-switch) live in
- * frontend-shared/design-tokens.css - this file only adds ops.html's own layout.
+ * Shared tokens/components (colors, spacing, badges) live in
+ * frontend-shared/design-tokens.css. Header/insight-card/Bootstrap-primary-color
+ * styling mirrors frontend-user/styles.css for a consistent brand across both apps.
  */
 
-.ops-header {
+.app-header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.mode-toggle-group {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
-.ops-header-toggles {
-  display: flex;
-  gap: var(--space-4);
-}
-
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--space-3);
-}
-
-.kpi-card {
-  padding: var(--space-2);
+.insight-card {
+  margin-bottom: 0;
+  padding: var(--space-3);
   text-align: center;
 }
 
-.kpi-label {
+.insight-label {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
   margin-bottom: var(--space-1);
 }
 
-.kpi-value {
-  font-size: var(--font-size-xl);
+.insight-value {
+  font-size: var(--font-size-lg);
   font-weight: 700;
+  color: var(--color-text);
+}
+
+/* Bootstrap ships its own blue .btn-primary/.form-check-input:checked colors -
+   override with the HSBC red brand color (spec.md Section 14.2), matching
+   frontend-user/styles.css. */
+.btn-primary {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:active {
+  background-color: var(--color-primary-hover) !important;
+  border-color: var(--color-primary-hover) !important;
+}
+
+.btn-outline-primary {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.btn-outline-primary:hover {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.form-check-input:checked {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 #results-table th:last-child,

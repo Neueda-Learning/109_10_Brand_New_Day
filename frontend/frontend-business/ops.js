@@ -143,6 +143,7 @@ function renderResults(result) {
     var actionCell = document.createElement("td");
     var viewBtn = document.createElement("button");
     viewBtn.type = "button";
+    viewBtn.className = "btn btn-outline-primary btn-sm";
     viewBtn.innerHTML = '<i class="bi bi-eye"></i> View';
     viewBtn.addEventListener("click", function () {
       loadDetail(payment);
