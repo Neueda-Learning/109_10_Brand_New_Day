@@ -8,9 +8,7 @@
  *   - List recent transactions via GET /api/payments (paginated).
  *   - Expand a transaction inline to show full detail + lifecycle timeline
  *     (frontend-shared/lifecycle-timeline.js) + refund action.
- *   - Compute KPI insight cards client-side (computeInsights()) - isolated,
- *     swappable helper pending the real GET /api/payments/insights endpoint
- *     (NOT_IMPLEMENTED, deferred to M4/Karuna scope).
+ *   - KPI insight cards via GET /api/payments/insights (spec.md Section 10.10).
  *   - Demo/Debug mode + light/dark theme via frontend-shared/app-mode.js.
  */
 (function () {
@@ -18,6 +16,23 @@
   var PAGE_SIZE = 10;
   var currentPage = 0;
   var loadedPayments = [];
+
+  // app-mode.js doesn't expose a fetchJson helper - wrap fetch() locally instead.
+  async function fetchJson(url, method, body) {
+    var options = { method: method || "GET" };
+    if (body !== undefined) {
+      options.headers = { "Content-Type": "application/json" };
+      options.body = JSON.stringify(body);
+    }
+    var response = await fetch(url, options);
+    var data = null;
+    try {
+      data = await response.json();
+    } catch (err) {
+      data = null;
+    }
+    return { ok: response.ok, status: response.status, data: data };
+  }
 
   document.addEventListener("DOMContentLoaded", function () {
     AppMode.initThemeToggle(document.getElementById("theme-toggle"));
@@ -48,7 +63,7 @@
       idempotencyKey: crypto.randomUUID()
     };
 
-    var result = await AppMode.fetchJson(API_BASE, "POST", body);
+    var result = await fetchJson(API_BASE, "POST", body);
     if (!result.ok) {
       errorEl.textContent = extractErrorMessage(result.data);
       errorEl.hidden = false;
@@ -62,53 +77,27 @@
     loadInsights();
 
     if (AppMode.getMode() === "demo") {
-      AppMode.autoAdvance(API_BASE, result.data.id, {
-        onStep: function () {
-          loadTransactions(0, false);
-        },
-        onStop: function () {
-          loadTransactions(0, false);
-          loadInsights();
-        }
+      AppMode.autoAdvance(API_BASE, result.data.id, function () {
+        loadTransactions(0, false);
+        loadInsights();
       });
     }
   }
 
-  // --- Insights (client-side computed, swappable for real /insights endpoint) ---
+  // --- Insights (GET /api/payments/insights, spec.md Section 10.10) ---
 
   async function loadInsights() {
-    var result = await AppMode.fetchJson(API_BASE + "?page=0&size=100");
+    var result = await fetchJson(API_BASE + "/insights");
     if (!result.ok) {
       return;
     }
-    var insights = computeInsights(result.data.content);
-    document.getElementById("insight-total-payments").textContent = insights.totalPayments;
-    document.getElementById("insight-total-amount").textContent = formatAmount(insights.totalAmount);
-    document.getElementById("insight-total-refunds").textContent = insights.totalRefunds;
-    document.getElementById("insight-success-rate").textContent = insights.successRate + "%";
-  }
-
-  /**
-   * Client-side KPI aggregation over a page of PaymentResponse objects.
-   * Isolated on purpose: swap the body of this function for a direct call to
-   * GET /api/payments/insights once that endpoint is implemented (M4).
-   */
-  function computeInsights(payments) {
-    payments = payments || [];
-    var totalPayments = payments.filter(function (p) { return p.type === "PAYMENT"; }).length;
-    var totalRefunds = payments.filter(function (p) { return p.type === "REFUND"; }).length;
-    var totalAmount = payments
-      .filter(function (p) { return p.type === "PAYMENT"; })
-      .reduce(function (sum, p) { return sum + Number(p.amount); }, 0);
-    var terminalCount = payments.filter(function (p) { return p.status === "COMPLETED" || p.status === "FAILED"; }).length;
-    var completedCount = payments.filter(function (p) { return p.status === "COMPLETED"; }).length;
-    var successRate = terminalCount === 0 ? 0 : Math.round((completedCount / terminalCount) * 100);
-    return {
-      totalPayments: totalPayments,
-      totalRefunds: totalRefunds,
-      totalAmount: totalAmount,
-      successRate: successRate
-    };
+    var insights = result.data;
+    var countByType = insights.countByType || {};
+    var amountByType = insights.amountByType || {};
+    document.getElementById("insight-total-payments").textContent = countByType.PAYMENT || 0;
+    document.getElementById("insight-total-amount").textContent = formatAmount(amountByType.PAYMENT || 0);
+    document.getElementById("insight-total-refunds").textContent = countByType.REFUND || 0;
+    document.getElementById("insight-success-rate").textContent = Math.round((insights.successRate || 0) * 100) + "%";
   }
 
   // --- Transaction list ---
@@ -117,7 +106,7 @@
     var errorEl = document.getElementById("transactions-error");
     errorEl.hidden = true;
 
-    var result = await AppMode.fetchJson(API_BASE + "?page=" + page + "&size=" + PAGE_SIZE);
+    var result = await fetchJson(API_BASE + "?page=" + page + "&size=" + PAGE_SIZE);
     if (!result.ok) {
       errorEl.textContent = extractErrorMessage(result.data);
       errorEl.hidden = false;
@@ -183,7 +172,7 @@
       "Payment Method: " + (payment.paymentMethod || "-") + "<br>" +
       (payment.errorCode ? "Error: " + payment.errorCode + "<br>" : "");
 
-    var historyResult = await AppMode.fetchJson(API_BASE + "/" + payment.id + "/history");
+    var historyResult = await fetchJson(API_BASE + "/" + payment.id + "/history");
     var timelineContainer = detailEl.querySelector(".timeline-container");
     renderLifecycleTimeline(
       timelineContainer,
@@ -221,7 +210,7 @@
       errorEl.hidden = true;
       var amount = parseFloat(form.querySelector(".refund-amount").value);
 
-      var result = await AppMode.fetchJson(API_BASE + "/" + payment.id + "/refund", "POST", {
+      var result = await fetchJson(API_BASE + "/" + payment.id + "/refund", "POST", {
         amount: amount,
         idempotencyKey: crypto.randomUUID()
       });
@@ -234,14 +223,9 @@
       loadTransactions(0, false);
 
       if (AppMode.getMode() === "demo") {
-        AppMode.autoAdvance(API_BASE, result.data.id, {
-          onStep: function () {
-            loadTransactions(0, false);
-          },
-          onStop: function () {
-            loadTransactions(0, false);
-            loadInsights();
-          }
+        AppMode.autoAdvance(API_BASE, result.data.id, function () {
+          loadTransactions(0, false);
+          loadInsights();
         });
       }
     });
@@ -249,9 +233,23 @@
     container.appendChild(form);
   }
 
+  /** Manual step options for debug mode, mirroring AppMode.autoAdvance's per-step bodies. */
+  function nextManualSteps(status) {
+    if (status === "CREATED") {
+      return [{ label: "Validate", body: {} }];
+    }
+    if (status === "VALIDATED") {
+      return [{ label: "Send", body: {} }];
+    }
+    if (status === "SENT") {
+      return [{ label: "Complete", body: { targetStatus: "COMPLETED" } }];
+    }
+    return [];
+  }
+
   function renderDebugControls(payment, detailEl) {
     var inspectorContainer = detailEl.querySelector(".inspector-container");
-    var steps = AppMode.nextManualSteps(payment.status);
+    var steps = nextManualSteps(payment.status);
     if (steps.length === 0) {
       return;
     }
@@ -264,8 +262,9 @@
       btn.textContent = step.label;
       btn.addEventListener("click", async function () {
         var url = API_BASE + "/" + payment.id + "/process";
-        var result = await AppMode.fetchJson(url, "POST", step.body);
-        AppMode.renderInspector(inspectorContainer, "POST", url, step.body, result.data);
+        AppMode.logRequest(inspectorContainer, { method: "POST", url: url, body: step.body });
+        var result = await fetchJson(url, "POST", step.body);
+        AppMode.logResponse(inspectorContainer, { status: result.status, body: result.data });
         loadTransactions(0, false);
       });
       controls.appendChild(btn);
