@@ -1,18 +1,20 @@
 /*
- * Shared design tokens (spec.md Section 9 - M4).
+ * Shared design tokens (spec.md Section 14.2 - HSBC-style brand/theming, v2.2).
  * Every page in frontend-user/ and frontend-business/ must include this file
  * for consistent colors, spacing, typography, and status-badge styling.
+ * Light mode is always the default; dark mode is opt-in via [data-theme="dark"]
+ * on <html>, toggled/persisted client-side (localStorage key "theme").
  */
 
 :root {
-  /* Colors */
+  /* Colors - HSBC-inspired banking palette (light mode, default) */
   --color-bg: #f5f7fa;
   --color-surface: #ffffff;
-  --color-text: #1a1f26;
+  --color-text: #1a1a1a;
   --color-text-muted: #5a6472;
   --color-border: #d8dee6;
-  --color-primary: #2f6fed;
-  --color-primary-hover: #2559c2;
+  --color-primary: #db0011;
+  --color-primary-hover: #a8000d;
   --color-danger: #d64545;
   --color-danger-hover: #b83636;
 
@@ -28,6 +30,15 @@
   --status-failed-bg: #fdeaea;
   --status-failed-fg: #c0392b;
 
+  /* Refund approval-status badge colors (added 2026-08-05, v2.2) - distinct from
+     the transport-status badges above so the two concepts never look identical. */
+  --status-pending_approval-bg: #fff0d6;
+  --status-pending_approval-fg: #8a5a00;
+  --status-approved-bg: #d9f5e3;
+  --status-approved-fg: #12703a;
+  --status-rejected-bg: #fbdede;
+  --status-rejected-fg: #a11d1d;
+
   /* Spacing scale */
   --space-1: 4px;
   --space-2: 8px;
@@ -36,7 +47,7 @@
   --space-5: 32px;
   --space-6: 48px;
 
-  /* Typography */
+  /* Typography - system fonts only, no webfonts */
   --font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-size-sm: 0.875rem;
   --font-size-base: 1rem;
@@ -45,6 +56,21 @@
 
   --radius: 6px;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  /* Animation - subtle only (spec Section 14.2) */
+  --transition-fast: 180ms ease-in-out;
+}
+
+/* Dark mode overrides (added 2026-08-05, v2.2) - opt-in only, no OS-preference
+   auto-detection. Only surface/border/text shift; brand red and status badge
+   hues stay the same for recognizability. */
+[data-theme="dark"] {
+  --color-bg: #121212;
+  --color-surface: #1e1e1e;
+  --color-text: #f2f2f2;
+  --color-text-muted: #a9b0bc;
+  --color-border: #3a3a3a;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -57,14 +83,24 @@ body {
   font-size: var(--font-size-base);
   color: var(--color-text);
   background: var(--color-bg);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 a {
   color: var(--color-primary);
 }
 
-h1, h2, h3 {
+h1, h2, h3, h4, h5, h6 {
   margin: 0 0 var(--space-3) 0;
+}
+
+/* Bootstrap's own heading rule also matches via utility classes (.h1-.h6),
+   which have higher specificity (0,1,0) than a bare tag selector (0,0,1) - so
+   elements like <h2 class="h5"> keep Bootstrap's fixed --bs-heading-color
+   instead of following the theme. Match the same class+tag selector list to
+   win on specificity and force headings to follow the current theme. */
+h1, .h1, h2, .h2, h3, .h3, h4, .h4, h5, .h5, h6, .h6 {
+  color: var(--color-text);
 }
 
 .container {
@@ -75,11 +111,41 @@ h1, h2, h3 {
 
 .card {
   background: var(--color-surface);
+  /* Bootstrap's .card component sets its own fixed --bs-card-color
+     independent of theme (same issue as headings) - override explicitly so
+     nested text/icons follow the current theme instead of always being dark. */
+  color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
   padding: var(--space-4);
   margin-bottom: var(--space-4);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+/* Bootstrap's .text-muted/.list-group-item also carry their own fixed colors
+   independent of theme - override to follow the theme's muted/text colors. */
+.text-muted {
+  color: var(--color-text-muted) !important;
+}
+
+.list-group-item {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+/* Bootstrap's .table sets an explicit white background/black text directly on
+   each th/td (via --bs-table-bg/--bs-table-color), bypassing inheritance from
+   body entirely - override explicitly so tables follow the current theme. */
+.table > :not(caption) > * > * {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-bottom-color: var(--color-border);
+}
+
+.table {
+  --bs-table-border-color: var(--color-border);
 }
 
 label {
@@ -96,6 +162,29 @@ input, select {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   font-size: var(--font-size-base);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+/* Bootstrap's .form-control/.form-select ship their own white background/dark
+   text via inline CSS variables (--bs-body-bg etc.) with higher specificity than
+   the bare element selectors above - override explicitly so dark mode applies
+   to Bootstrap-styled forms too (spec.md Section 14.2). */
+.form-control, .form-select {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.form-control:focus, .form-select:focus {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-primary);
+  box-shadow: none;
+}
+
+.form-control::placeholder {
+  color: var(--color-text-muted);
 }
 
 button {
@@ -107,6 +196,7 @@ button {
   color: #fff;
   font-size: var(--font-size-base);
   cursor: pointer;
+  transition: background var(--transition-fast);
 }
 
 button:hover {
@@ -139,6 +229,9 @@ button:disabled {
 .status-badge.SENT { background: var(--status-sent-bg); color: var(--status-sent-fg); }
 .status-badge.COMPLETED { background: var(--status-completed-bg); color: var(--status-completed-fg); }
 .status-badge.FAILED { background: var(--status-failed-bg); color: var(--status-failed-fg); }
+.status-badge.PENDING_APPROVAL { background: var(--status-pending_approval-bg); color: var(--status-pending_approval-fg); }
+.status-badge.APPROVED { background: var(--status-approved-bg); color: var(--status-approved-fg); }
+.status-badge.REJECTED { background: var(--status-rejected-bg); color: var(--status-rejected-fg); }
 
 .error-message {
   color: var(--color-danger);
@@ -167,6 +260,12 @@ th, td {
 .timeline-item {
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--color-border);
+  animation: timeline-reveal var(--transition-fast) ease-in-out;
+}
+
+@keyframes timeline-reveal {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .timeline-item:last-child {
@@ -194,3 +293,33 @@ th, td {
   color: var(--color-text-muted);
   font-style: italic;
 }
+
+/* Mode toggles (app-mode.js / theme toggle) - shared header switches */
+.mode-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+/* Debug-mode inspector panel (app-mode.js renderInspector) */
+.inspector-entry {
+  margin-bottom: var(--space-2);
+  padding: var(--space-3);
+}
+
+.inspector-line {
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-1);
+}
+
+.inspector-json {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  font-size: var(--font-size-sm);
+  overflow-x: auto;
+  margin: 0 0 var(--space-2) 0;
+}
+
