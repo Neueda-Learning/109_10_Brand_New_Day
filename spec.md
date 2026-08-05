@@ -625,6 +625,8 @@ Query params: `status`, `type`, `sourceAccount`, `destinationAccount`, `fromDate
 
 - An unrecognized/invalid value for `status` or `type` (i.e. not one of the enum values)
   returns `400 VALIDATION_ERROR` — never a `500`.
+- `page` must be `>= 0`; `size` must be between `1` and `100` inclusive. Values outside
+  these bounds return `400 VALIDATION_ERROR` — never a `500` (added 2026-08-05).
 - Default sort order is `created_at DESC` (newest payments first) when no explicit
   ordering is requested. There is no sort-by query param in this MVP — a fixed default
   is enough.
