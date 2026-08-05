@@ -42,5 +42,9 @@ docker-compose.yml   Local MySQL for development
 
 ### Status
 
-Phase 1 (backbone scaffolding) is complete — see Section 2 and Section 18 of
-[spec.md](spec.md) for current module-by-module progress.
+M1-M4 backend/frontend implementation is complete and merged to `main`, including the
+refund approval workflow and the `/insights` aggregate endpoint — see Section 2 and
+Section 18 of [spec.md](spec.md) for current module-by-module progress. The project is
+now starting the [product.md](product.md)-driven redesign (7-table schema, invoices,
+multi-currency, BND AI checkout/ops dashboard) — see `spec.md` for the live phase
+status once that rewrite lands.

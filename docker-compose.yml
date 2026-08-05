@@ -1,4 +1,9 @@
 services:
+  # NOTE: application.properties in the current local dev environment connects as
+  # root/n3u3da! against a native MySQL install, NOT these payment_app/payment_app /
+  # root/root credentials. This is a known, deliberate local-dev divergence (not a
+  # bug) - if you use this compose file's MySQL container, update
+  # backend/src/main/resources/application.properties to match the credentials below.
   mysql:
     image: mysql:8.0
     container_name: bnd-pp-mysql

@@ -5,14 +5,11 @@
 //   - GET /api/payments/{id}/history (Section 10.4) for the detail timeline
 //   - POST /api/payments/{id}/refund/approve|reject (Section 10.8/10.9) for actions
 //
-// NOTE: paymentMethod/approvalStatus filtering, the KPI's pendingApprovalCount, and
-// the Approve/Reject actions all depend on feature/m3-refund-approval /
-// feature/m4-insights-api landing on main first. Until then:
-//   - /insights calls will 404 - the KPI section shows "Unavailable" instead of crashing.
-//   - paymentMethod/approvalStatus query params are sent but silently ignored by the
-//     current backend (unknown params are dropped, not an error).
-//   - Approve/Reject buttons stay hidden because `payment.approvalStatus` is always
-//     undefined on today's PaymentResponse, so the visibility check below never passes.
+// NOTE (updated 2026-08-05): the insights endpoint, paymentMethod/approvalStatus
+// filtering, and the Approve/Reject actions are all live on `main` today - the refund
+// approval workflow and insights aggregate endpoint have been implemented and tested.
+// The error-message/"Unavailable" fallback paths below are kept only as defensive UI
+// (e.g. backend temporarily down), not because the endpoints are unimplemented.
 
 var API_BASE_URL = "http://localhost:8080";
 var PAYMENTS_API = API_BASE_URL + "/api/payments";

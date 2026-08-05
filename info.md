@@ -26,20 +26,23 @@ notifications, batch processing.
 
 ## 2. Feature → Dev Mapping
 
-Full detail in `spec.md` Section 9. Summary:
+Full detail in `spec.md` Section 9. Summary (updated 2026-08-05 — both frontends are now
+single unified pages, not the original per-module page split):
 
 | Module | Owner | Feature scope | Backend files | Frontend page(s) |
 |---|---|---|---|---|
 | M1 — Creation & Validation | Poornima | Create payment, get-by-id, input validation | `PaymentController`, `PaymentService(Impl)`, `PaymentRepository`/`JdbcPaymentRepository` (create/get) | `frontend-user/index.html` |
-| M2 — Status Engine & Audit Trail | Neha | `process` transitions, status history | `PaymentController` (process), `PaymentStatusHistoryRepository`/`Jdbc...` | `frontend-business/audit.html` |
-| M3 — Idempotency, Errors, Refund | Tharan | Idempotency short-circuit, refund rules, exception handling | `GlobalExceptionHandler`, 4 exception classes, refund service/repo logic | `frontend-user/detail.html` |
-| M4 — Query API, Lifecycle UI, Design System, API Docs | Karuna | Search/filter/paginate, shared UI components, OpenAPI config | `PaymentQueryController`, `OpenApiConfig`, `frontend-shared/*` | `frontend-business/dashboard.html`, `frontend-user/history.html` |
+| M2 — Status Engine & Audit Trail | Neha | `process` transitions, status history | `PaymentController` (process), `PaymentStatusHistoryRepository`/`Jdbc...` | `frontend-business/ops.html` |
+| M3 — Idempotency, Errors, Refund | Tharan | Idempotency short-circuit, refund rules, refund approval workflow, exception handling | `GlobalExceptionHandler`, exception classes, refund service/repo logic | `frontend-user/index.html`, `frontend-business/ops.html` (approve/reject) |
+| M4 — Query API, Lifecycle UI, Design System, API Docs, Insights | Karuna | Search/filter/paginate, aggregate insights, shared UI components, OpenAPI config | `PaymentQueryController`, `PaymentAnalyticsService(Impl)`, `OpenApiConfig`, `frontend-shared/*` | `frontend-business/ops.html`, `frontend-user/index.html` |
 
-Current phase: **Phase 2 (backend/frontend implementation) — DONE for M1-M4 on their
-respective branches** (M1/M2/M3 merged to `main`; M4 implemented and tested on
-`feature/m4-lifecycle-ui`, PR to `main` still pending). Phase 3 (cross-module
-integration validation) is `IN_PROGRESS` — see `spec.md` Section 2 for the live
-dashboard.
+Current phase: **Phase 2 (backend/frontend implementation) is DONE for M1-M4, merged to
+`main`**, including the refund approval workflow and the `/insights` aggregate endpoint.
+Both frontends were unified into single-page apps (`frontend-user/index.html`,
+`frontend-business/ops.html`) on 2026-08-05, replacing the original
+index/history/detail and dashboard/audit page split. See `spec.md` Section 2 for the
+live status dashboard — the project is about to start the product.md-driven Phase 3
+redesign (7-table schema, invoices, multi-currency, customers).
 
 ## 3. REST Endpoints
 
@@ -47,10 +50,13 @@ dashboard.
 |---|---|---|---|---|
 | `/api/payments` | POST | M1 (+M3 idempotency) | Create payment | TESTED |
 | `/api/payments/{id}` | GET | M1 | Fetch payment by id | TESTED |
-| `/api/payments` | GET | M4 | List/filter/search payments (paginated) | TESTED (pending merge to `main`) |
+| `/api/payments` | GET | M4 | List/filter/search payments (paginated) | TESTED |
+| `/api/payments/insights` | GET | M4 | Aggregate KPI/analytics for dashboards | TESTED |
 | `/api/payments/{id}/history` | GET | M2 | Full status history timeline | TESTED |
 | `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | TESTED |
 | `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | TESTED |
+| `/api/payments/{id}/refund/approve` | POST | M3 | Approve a pending refund | TESTED |
+| `/api/payments/{id}/refund/reject` | POST | M3 | Reject a pending refund | TESTED |
 
 Full request/response JSON shapes and error codes: `spec.md` Section 10. All error
 responses use one shared `ErrorResponse` shape (timestamp, status, errorCode, message, path).
@@ -61,22 +67,34 @@ Live interactive docs once the app is running: `http://localhost:8080/swagger-ui
 
 ## 4. UI Wireframes (text description — no image assets yet)
 
-**`frontend-user/` (end-customer app):**
-- `index.html` — "New Payment" form: source account, destination account, amount,
-  currency (defaults `INR`), idempotency key → submit → result card showing new payment
-  id + status.
-- `history.html` — simplified list of the customer's own payment history.
-- `detail.html` — single payment detail view + refund action.
+Updated 2026-08-05: both apps are now single unified pages (the original
+index/history/detail and dashboard/audit page split was retired — those six legacy
+files no longer exist in the repo).
 
-**`frontend-business/` (internal ops app):**
-- `dashboard.html` — filterable/searchable payments table: status, type, source/destination
-  account, date range filters, paginated results grid.
-- `audit.html` — full status-change audit trail viewer (uses the shared
-  `lifecycle-timeline.js` component).
+**`frontend-user/` (end-customer app) — `index.html` + `script.js` + `styles.css`:**
+- KPI insight cards (total payments, total amount, refunds, success rate) fed by
+  `GET /api/payments/insights`.
+- "New Payment" form: source account, destination account, amount, currency (free-text,
+  defaults `INR`), idempotency key → submit → result card showing new payment id + status.
+- Expandable recent-transactions list with inline detail (status badge, lifecycle
+  timeline, refund action when `COMPLETED`).
+- Demo mode auto-advances the lifecycle; Debug mode exposes manual step buttons + a
+  request/response inspector (both via `frontend-shared/app-mode.js`).
 
-**`frontend-shared/`** — `design-tokens.css` (colors/spacing/typography vars) and
-`lifecycle-timeline.js` (reusable timeline component), consumed by both apps. No
-page-specific logic lives here.
+**`frontend-business/` (internal ops app) — `ops.html` + `ops.js` + `ops.css`:**
+- KPI strip (total payments, total amount, success rate, refund rate, pending
+  approvals) fed by `GET /api/payments/insights`.
+- Filter panel (status, type, payment method, approval status, source/destination
+  account, date range) over a paginated results table.
+- Detail panel (opened via a table row's "View" button): full payment info, lifecycle
+  timeline (`frontend-shared/lifecycle-timeline.js`), and refund Approve/Reject actions
+  when a refund is `PENDING_APPROVAL`.
+- Same Demo/Debug mode infrastructure as `frontend-user`.
+
+**`frontend-shared/`** — `design-tokens.css` (colors/spacing/typography vars, HSBC red
+brand, dark-mode overrides), `lifecycle-timeline.js` (reusable timeline component), and
+`app-mode.js` (Demo/Debug mode + dark-mode toggle persistence), consumed by both apps.
+No page-specific logic lives here.
 
 No dedicated wireframe image files (Figma/PNG) exist in the repo — the scaffolded HTML
 files above are the working wireframes.
