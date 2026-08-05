@@ -1,5 +1,7 @@
 package com.bnd.payment_processing.payment.controller;
 
+import com.bnd.payment_processing.payment.dto.PaymentInsightsResponse;
+import com.bnd.payment_processing.payment.service.PaymentAnalyticsService;
 import com.bnd.payment_processing.payment.service.PaymentService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -11,7 +13,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * {@code GET /api/payments} list/filter/search endpoint (spec.md Section 10.3).
+ * {@code GET /api/payments} list/filter/search endpoint (spec.md Section 10.3) and
+ * {@code GET /api/payments/insights} aggregate endpoint (spec.md Section 10.10).
  * Owner: M4 (Karuna).
  */
 @RestController
@@ -19,9 +22,22 @@ import java.util.Map;
 public class PaymentQueryController {
 
     private final PaymentService paymentService;
+    private final PaymentAnalyticsService paymentAnalyticsService;
 
-    public PaymentQueryController(PaymentService paymentService) {
+    public PaymentQueryController(PaymentService paymentService, PaymentAnalyticsService paymentAnalyticsService) {
         this.paymentService = paymentService;
+        this.paymentAnalyticsService = paymentAnalyticsService;
+    }
+
+    // Literal "/insights" segment - must not collide with PaymentController's "/{id}"
+    // path variable (spec.md Section 10.10 routing note; proven by a MockMvc test).
+    @GetMapping("/insights")
+    public PaymentInsightsResponse getInsights(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) LocalDate fromDate,
+            @RequestParam(required = false) LocalDate toDate) {
+        return paymentAnalyticsService.getInsights(status, type, fromDate, toDate);
     }
 
     @GetMapping
