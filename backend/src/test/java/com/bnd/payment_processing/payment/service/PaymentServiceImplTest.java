@@ -612,6 +612,42 @@ class PaymentServiceImplTest {
     }
 
     @Test
+    void searchPayments_validPaymentMethodAndApprovalStatus_passesUppercasedEnumNamesToRepository() {
+        when(paymentRepository.search(any(), eq(0), eq(20))).thenReturn(List.of());
+        when(paymentRepository.countSearch(any())).thenReturn(0L);
+
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("paymentMethod", "bank_transfer");
+        filters.put("approvalStatus", "pending_approval");
+
+        service.searchPayments(filters, 0, 20);
+
+        verify(paymentRepository).search(argThat(f ->
+                "BANK_TRANSFER".equals(f.get("paymentMethod")) && "PENDING_APPROVAL".equals(f.get("approvalStatus"))),
+                eq(0), eq(20));
+        verify(paymentRepository).countSearch(argThat(f ->
+                "BANK_TRANSFER".equals(f.get("paymentMethod")) && "PENDING_APPROVAL".equals(f.get("approvalStatus"))));
+    }
+
+    @Test
+    void searchPayments_invalidPaymentMethod_throwsIllegalArgumentException() {
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("paymentMethod", "BOGUS");
+
+        assertThatThrownBy(() -> service.searchPayments(filters, 0, 20))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void searchPayments_invalidApprovalStatus_throwsIllegalArgumentException() {
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("approvalStatus", "BOGUS");
+
+        assertThatThrownBy(() -> service.searchPayments(filters, 0, 20))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void searchPayments_invalidStatus_throwsIllegalArgumentException() {
         Map<String, Object> filters = new LinkedHashMap<>();
         filters.put("status", "BOGUS");
