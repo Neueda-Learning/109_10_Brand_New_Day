@@ -4,11 +4,16 @@ import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
 import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
 import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
 import com.bnd.payment_processing.common.exception.PaymentNotFoundException;
+import com.bnd.payment_processing.common.exception.RefundNotApprovedException;
+import com.bnd.payment_processing.payment.dto.ApproveRefundRequest;
 import com.bnd.payment_processing.payment.dto.CreatePaymentRequest;
 import com.bnd.payment_processing.payment.dto.ProcessRequest;
 import com.bnd.payment_processing.payment.dto.PaymentResponse;
 import com.bnd.payment_processing.payment.dto.RefundRequest;
+import com.bnd.payment_processing.payment.dto.RejectRefundRequest;
 import com.bnd.payment_processing.payment.model.Payment;
+import com.bnd.payment_processing.payment.model.ApprovalStatus;
+import com.bnd.payment_processing.payment.model.PaymentMethod;
 import com.bnd.payment_processing.payment.model.PaymentStatus;
 import com.bnd.payment_processing.payment.model.PaymentType;
 import com.bnd.payment_processing.payment.repository.PaymentRepository;
@@ -86,6 +91,17 @@ class PaymentServiceImplTest {
         payment.setStatus(status);
         payment.setErrorCode(null);
         return payment;
+    }
+
+    /** A freshly created refund sitting at CREATED/PENDING_APPROVAL, as produced by createRefund(). */
+    private Payment pendingApprovalRefund() {
+        Payment refund = completedPayment(new BigDecimal("100.00"));
+        refund.setStatus(PaymentStatus.CREATED);
+        refund.setType(PaymentType.REFUND);
+        refund.setOriginalPaymentId(UUID.randomUUID());
+        refund.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+        refund.setPaymentMethod(PaymentMethod.BANK_TRANSFER);
+        return refund;
     }
 
     @Test
@@ -309,7 +325,7 @@ class PaymentServiceImplTest {
     @Test
     void createRefund_happyPath_insertsSwappedAccountsAndCreatedStatus() {
         Payment original = completedPayment(new BigDecimal("1000.00"));
-        when(paymentRepository.findById(original.getId())).thenReturn(Optional.of(original));
+        when(paymentRepository.findByIdForUpdate(original.getId())).thenReturn(Optional.of(original));
         when(paymentRepository.sumRefundedAmount(original.getId())).thenReturn(BigDecimal.ZERO);
 
         RefundRequest request = new RefundRequest();
@@ -334,7 +350,7 @@ class PaymentServiceImplTest {
     void createRefund_originalNotCompleted_throwsInvalidRefundStateException() {
         Payment original = completedPayment(new BigDecimal("1000.00"));
         original.setStatus(PaymentStatus.SENT);
-        when(paymentRepository.findById(original.getId())).thenReturn(Optional.of(original));
+        when(paymentRepository.findByIdForUpdate(original.getId())).thenReturn(Optional.of(original));
 
         RefundRequest request = new RefundRequest();
         request.setAmount(new BigDecimal("100.00"));
@@ -347,7 +363,7 @@ class PaymentServiceImplTest {
     void createRefund_originalIsAlreadyARefund_throwsInvalidRefundStateException() {
         Payment original = completedPayment(new BigDecimal("1000.00"));
         original.setType(PaymentType.REFUND);
-        when(paymentRepository.findById(original.getId())).thenReturn(Optional.of(original));
+        when(paymentRepository.findByIdForUpdate(original.getId())).thenReturn(Optional.of(original));
 
         RefundRequest request = new RefundRequest();
         request.setAmount(new BigDecimal("100.00"));
@@ -359,7 +375,7 @@ class PaymentServiceImplTest {
     @Test
     void createRefund_cumulativeAmountExceedsOriginal_throwsInvalidRefundStateException() {
         Payment original = completedPayment(new BigDecimal("1000.00"));
-        when(paymentRepository.findById(original.getId())).thenReturn(Optional.of(original));
+        when(paymentRepository.findByIdForUpdate(original.getId())).thenReturn(Optional.of(original));
         when(paymentRepository.sumRefundedAmount(original.getId())).thenReturn(new BigDecimal("700.00"));
 
         RefundRequest request = new RefundRequest();
@@ -374,7 +390,7 @@ class PaymentServiceImplTest {
     @Test
     void createRefund_exactFullRemainingAmount_succeeds() {
         Payment original = completedPayment(new BigDecimal("1000.00"));
-        when(paymentRepository.findById(original.getId())).thenReturn(Optional.of(original));
+        when(paymentRepository.findByIdForUpdate(original.getId())).thenReturn(Optional.of(original));
         when(paymentRepository.sumRefundedAmount(original.getId())).thenReturn(new BigDecimal("600.00"));
 
         RefundRequest request = new RefundRequest();
@@ -384,6 +400,189 @@ class PaymentServiceImplTest {
 
         assertThat(response.getAmount()).isEqualByComparingTo("400.00");
         verify(paymentRepository).insert(any(Payment.class));
+    }
+
+    @Test
+    void createRefund_newRefund_startsPendingApprovalAndInheritsOriginalPaymentMethod() {
+        Payment original = completedPayment(new BigDecimal("1000.00"));
+        original.setPaymentMethod(PaymentMethod.BANK_TRANSFER);
+        when(paymentRepository.findByIdForUpdate(original.getId())).thenReturn(Optional.of(original));
+        when(paymentRepository.sumRefundedAmount(original.getId())).thenReturn(BigDecimal.ZERO);
+
+        RefundRequest request = new RefundRequest();
+        request.setAmount(new BigDecimal("200.00"));
+
+        PaymentResponse response = service.createRefund(original.getId(), request);
+
+        assertThat(response.getApprovalStatus()).isEqualTo(ApprovalStatus.PENDING_APPROVAL);
+        assertThat(response.getPaymentMethod()).isEqualTo(PaymentMethod.BANK_TRANSFER);
+    }
+
+    @Test
+    void createRefund_withIdempotencyKeyAlreadyUsed_throwsDuplicatePaymentExceptionWithExistingRow() {
+        Payment original = completedPayment(new BigDecimal("1000.00"));
+        when(paymentRepository.findByIdForUpdate(original.getId())).thenReturn(Optional.of(original));
+        when(paymentRepository.sumRefundedAmount(original.getId())).thenReturn(BigDecimal.ZERO);
+
+        RefundRequest request = new RefundRequest();
+        request.setAmount(new BigDecimal("200.00"));
+        request.setIdempotencyKey("refund-idem-key-1");
+
+        Payment existingRefund = pendingApprovalRefund();
+        existingRefund.setIdempotencyKey("refund-idem-key-1");
+
+        doThrow(new DuplicateKeyException("duplicate idempotency_key"))
+                .when(paymentRepository).insert(any(Payment.class));
+        when(paymentRepository.findByIdempotencyKey("refund-idem-key-1"))
+                .thenReturn(Optional.of(existingRefund));
+
+        assertThatThrownBy(() -> service.createRefund(original.getId(), request))
+                .isInstanceOf(DuplicatePaymentException.class)
+                .satisfies(ex -> assertThat(((DuplicatePaymentException) ex).getExistingPayment()).isEqualTo(existingRefund));
+
+        verify(paymentStatusHistoryRepository, never()).insert(any());
+    }
+
+    @Test
+    void processTransition_refundPendingApproval_throwsRefundNotApprovedException() {
+        Payment refund = pendingApprovalRefund();
+        when(paymentRepository.findById(refund.getId())).thenReturn(Optional.of(refund));
+
+        assertThatThrownBy(() -> service.processTransition(refund.getId(), null))
+                .isInstanceOf(RefundNotApprovedException.class);
+
+        verify(paymentRepository, never()).updateStatusIfCurrent(any(), any(), any(), any());
+        verify(paymentStatusHistoryRepository, never()).insert(any());
+    }
+
+    @Test
+    void processTransition_refundApproved_createdToValidated_succeedsLikeAnyOtherPayment() {
+        Payment refund = pendingApprovalRefund();
+        refund.setApprovalStatus(ApprovalStatus.APPROVED);
+        Payment updated = pendingApprovalRefund();
+        updated.setId(refund.getId());
+        updated.setStatus(PaymentStatus.VALIDATED);
+        updated.setApprovalStatus(ApprovalStatus.APPROVED);
+
+        when(paymentRepository.findById(refund.getId())).thenReturn(Optional.of(refund), Optional.of(updated));
+        when(paymentRepository.updateStatusIfCurrent(refund.getId(), "CREATED", "VALIDATED", null)).thenReturn(1);
+
+        PaymentResponse response = service.processTransition(refund.getId(), null);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.VALIDATED);
+        verify(paymentRepository).updateStatusIfCurrent(refund.getId(), "CREATED", "VALIDATED", null);
+    }
+
+    @Test
+    void approveRefund_happyPath_updatesApprovalFieldsAndReturnsMappedResponse() {
+        Payment refund = pendingApprovalRefund();
+        Payment approved = pendingApprovalRefund();
+        approved.setId(refund.getId());
+        approved.setApprovalStatus(ApprovalStatus.APPROVED);
+        approved.setApprovedBy("business-user-1");
+
+        when(paymentRepository.findById(refund.getId())).thenReturn(Optional.of(refund), Optional.of(approved));
+        when(paymentRepository.approveRefund(eq(refund.getId()), eq("business-user-1"), any(Instant.class))).thenReturn(1);
+
+        ApproveRefundRequest request = new ApproveRefundRequest();
+        request.setApprovedBy("business-user-1");
+
+        PaymentResponse response = service.approveRefund(refund.getId(), request);
+
+        assertThat(response.getApprovalStatus()).isEqualTo(ApprovalStatus.APPROVED);
+        assertThat(response.getApprovedBy()).isEqualTo("business-user-1");
+    }
+
+    @Test
+    void approveRefund_notPendingApproval_throwsRefundNotApprovedException() {
+        Payment refund = pendingApprovalRefund();
+        refund.setApprovalStatus(ApprovalStatus.APPROVED);
+        when(paymentRepository.findById(refund.getId())).thenReturn(Optional.of(refund));
+        when(paymentRepository.approveRefund(eq(refund.getId()), any(), any(Instant.class))).thenReturn(0);
+
+        ApproveRefundRequest request = new ApproveRefundRequest();
+        request.setApprovedBy("business-user-1");
+
+        assertThatThrownBy(() -> service.approveRefund(refund.getId(), request))
+                .isInstanceOf(RefundNotApprovedException.class);
+    }
+
+    @Test
+    void approveRefund_unknownPayment_throwsPaymentNotFoundException() {
+        UUID id = UUID.randomUUID();
+        when(paymentRepository.findById(id)).thenReturn(Optional.empty());
+
+        ApproveRefundRequest request = new ApproveRefundRequest();
+        request.setApprovedBy("business-user-1");
+
+        assertThatThrownBy(() -> service.approveRefund(id, request))
+                .isInstanceOf(PaymentNotFoundException.class);
+
+        verify(paymentRepository, never()).approveRefund(any(), any(), any());
+    }
+
+    @Test
+    void rejectRefund_happyPath_appendsCreatedToFailedHistoryRow() {
+        Payment refund = pendingApprovalRefund();
+        Payment rejected = pendingApprovalRefund();
+        rejected.setId(refund.getId());
+        rejected.setApprovalStatus(ApprovalStatus.REJECTED);
+        rejected.setStatus(PaymentStatus.FAILED);
+        rejected.setErrorCode("REFUND_REJECTED");
+        rejected.setRejectionReason("duplicate refund request");
+
+        when(paymentRepository.findById(refund.getId())).thenReturn(Optional.of(refund), Optional.of(rejected));
+        when(paymentRepository.rejectRefund(refund.getId(), "duplicate refund request")).thenReturn(1);
+
+        RejectRefundRequest request = new RejectRefundRequest();
+        request.setRejectedBy("business-user-2");
+        request.setReason("duplicate refund request");
+
+        PaymentResponse response = service.rejectRefund(refund.getId(), request);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(response.getApprovalStatus()).isEqualTo(ApprovalStatus.REJECTED);
+        verify(paymentStatusHistoryRepository).insert(argThat(history ->
+                history.getFromStatus() == PaymentStatus.CREATED
+                        && history.getToStatus() == PaymentStatus.FAILED
+                        && "business-user-2".equals(history.getTriggeredBy())));
+    }
+
+    @Test
+    void rejectRefund_notPendingApproval_throwsRefundNotApprovedException() {
+        Payment refund = pendingApprovalRefund();
+        refund.setApprovalStatus(ApprovalStatus.REJECTED);
+        when(paymentRepository.findById(refund.getId())).thenReturn(Optional.of(refund));
+        when(paymentRepository.rejectRefund(refund.getId(), "already rejected")).thenReturn(0);
+
+        RejectRefundRequest request = new RejectRefundRequest();
+        request.setRejectedBy("business-user-2");
+        request.setReason("already rejected");
+
+        assertThatThrownBy(() -> service.rejectRefund(refund.getId(), request))
+                .isInstanceOf(RefundNotApprovedException.class);
+
+        verify(paymentStatusHistoryRepository, never()).insert(any());
+    }
+
+    @Test
+    void createPayment_paymentMethodOmitted_defaultsToBankTransfer() {
+        CreatePaymentRequest request = newCreateRequest();
+        request.setPaymentMethod(null);
+
+        PaymentResponse response = service.createPayment(request);
+
+        assertThat(response.getPaymentMethod()).isEqualTo(PaymentMethod.BANK_TRANSFER);
+    }
+
+    @Test
+    void createPayment_explicitPaymentMethod_isPersisted() {
+        CreatePaymentRequest request = newCreateRequest();
+        request.setPaymentMethod("BANK_TRANSFER");
+
+        PaymentResponse response = service.createPayment(request);
+
+        assertThat(response.getPaymentMethod()).isEqualTo(PaymentMethod.BANK_TRANSFER);
     }
 
     @Test

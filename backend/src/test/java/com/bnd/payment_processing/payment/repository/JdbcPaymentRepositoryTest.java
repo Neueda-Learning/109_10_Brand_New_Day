@@ -1,11 +1,19 @@
 package com.bnd.payment_processing.payment.repository;
 
+import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
+import com.bnd.payment_processing.payment.dto.RefundRequest;
+import com.bnd.payment_processing.payment.model.ApprovalStatus;
 import com.bnd.payment_processing.payment.model.Payment;
+import com.bnd.payment_processing.payment.model.PaymentMethod;
 import com.bnd.payment_processing.payment.model.PaymentStatus;
 import com.bnd.payment_processing.payment.model.PaymentType;
+import com.bnd.payment_processing.payment.service.PaymentService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -17,6 +25,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,6 +44,12 @@ class JdbcPaymentRepositoryTest {
 
     @Autowired
     private PaymentRepository paymentRepository;
+
+    @Autowired
+    private PaymentService paymentService;
+
+    @Autowired
+    private NamedParameterJdbcTemplate jdbcTemplate;
 
     // Seeded COMPLETED PAYMENT with no refunds against it - data.sql line 8.
     private static final UUID SEEDED_COMPLETED_NO_REFUNDS_ID =
@@ -107,6 +125,163 @@ class JdbcPaymentRepositoryTest {
         refund.setCreatedAt(Instant.now());
         refund.setUpdatedAt(Instant.now());
         return refund;
+    }
+
+    // --- Added 2026-08-05 (spec.md Section 8.1 rule 6 / Section 8.3, v2.2): findByIdForUpdate ---
+
+    @Test
+    void findByIdForUpdate_existingSeededRow_returnsSameDataAsFindById() {
+        Optional<Payment> found = paymentRepository.findByIdForUpdate(SEEDED_COMPLETED_NO_REFUNDS_ID);
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getId()).isEqualTo(SEEDED_COMPLETED_NO_REFUNDS_ID);
+        assertThat(found.get().getStatus()).isEqualTo(PaymentStatus.COMPLETED);
+    }
+
+    @Test
+    void findByIdForUpdate_unknownId_returnsEmpty() {
+        assertThat(paymentRepository.findByIdForUpdate(UUID.randomUUID())).isEmpty();
+    }
+
+    // --- Added 2026-08-05: approveRefund() / rejectRefund() conditional updates ---
+
+    @Test
+    void approveRefund_pendingApprovalRow_updatesFieldsAndAffectsOneRow() {
+        Payment refund = newRefundRow(SEEDED_COMPLETED_NO_REFUNDS_ID, new BigDecimal("50.00"));
+        refund.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+        paymentRepository.insert(refund);
+
+        int rowsAffected = paymentRepository.approveRefund(refund.getId(), "business-user-1", Instant.now());
+
+        assertThat(rowsAffected).isEqualTo(1);
+        Payment updated = paymentRepository.findById(refund.getId()).orElseThrow();
+        assertThat(updated.getApprovalStatus()).isEqualTo(ApprovalStatus.APPROVED);
+        assertThat(updated.getApprovedBy()).isEqualTo("business-user-1");
+        assertThat(updated.getApprovedAt()).isNotNull();
+    }
+
+    @Test
+    void approveRefund_alreadyApprovedRow_affectsZeroRows() {
+        Payment refund = newRefundRow(SEEDED_COMPLETED_NO_REFUNDS_ID, new BigDecimal("50.00"));
+        refund.setApprovalStatus(ApprovalStatus.APPROVED);
+        paymentRepository.insert(refund);
+
+        int rowsAffected = paymentRepository.approveRefund(refund.getId(), "business-user-1", Instant.now());
+
+        assertThat(rowsAffected).isEqualTo(0);
+    }
+
+    @Test
+    void approveRefund_paymentTypeRow_affectsZeroRows() {
+        int rowsAffected = paymentRepository.approveRefund(SEEDED_COMPLETED_NO_REFUNDS_ID, "business-user-1", Instant.now());
+
+        assertThat(rowsAffected).isEqualTo(0);
+    }
+
+    @Test
+    void rejectRefund_pendingApprovalRow_movesStatusToFailedAndAffectsOneRow() {
+        Payment refund = newRefundRow(SEEDED_COMPLETED_NO_REFUNDS_ID, new BigDecimal("50.00"));
+        refund.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+        paymentRepository.insert(refund);
+
+        int rowsAffected = paymentRepository.rejectRefund(refund.getId(), "duplicate request");
+
+        assertThat(rowsAffected).isEqualTo(1);
+        Payment updated = paymentRepository.findById(refund.getId()).orElseThrow();
+        assertThat(updated.getApprovalStatus()).isEqualTo(ApprovalStatus.REJECTED);
+        assertThat(updated.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(updated.getErrorCode()).isEqualTo("REFUND_REJECTED");
+        assertThat(updated.getRejectionReason()).isEqualTo("duplicate request");
+    }
+
+    @Test
+    void rejectRefund_alreadyRejectedRow_affectsZeroRows() {
+        Payment refund = newRefundRow(SEEDED_COMPLETED_NO_REFUNDS_ID, new BigDecimal("50.00"));
+        refund.setApprovalStatus(ApprovalStatus.REJECTED);
+        paymentRepository.insert(refund);
+
+        int rowsAffected = paymentRepository.rejectRefund(refund.getId(), "already rejected");
+
+        assertThat(rowsAffected).isEqualTo(0);
+    }
+
+    // --- Added 2026-08-05 (spec.md Section 8.3, v2.2): real DB concurrency check for the
+    // FOR UPDATE lock taken by findByIdForUpdate() inside PaymentServiceImpl.createRefund(). ---
+
+    @Test
+    void createRefund_concurrentRequestsExceedingBalance_onlyOneSucceeds() throws Exception {
+        Payment original = new Payment();
+        original.setId(UUID.randomUUID());
+        original.setIdempotencyKey("concurrency-test-" + original.getId());
+        original.setSourceAccount("ACC-CONCUR-SRC");
+        original.setDestinationAccount("ACC-CONCUR-DST");
+        original.setAmount(new BigDecimal("1000.00"));
+        original.setCurrency("INR");
+        original.setStatus(PaymentStatus.COMPLETED);
+        original.setType(PaymentType.PAYMENT);
+        original.setPaymentMethod(PaymentMethod.BANK_TRANSFER);
+        original.setCreatedAt(Instant.now());
+        original.setUpdatedAt(Instant.now());
+        paymentRepository.insert(original);
+        // Commit this row for real so the two worker threads below (each running
+        // PaymentServiceImpl.createRefund() in its own @Transactional/connection) can see
+        // it - this test method's own transaction is normally rolled back automatically
+        // by the class-level @Transactional.
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+        TestTransaction.start();
+
+        try {
+            RefundRequest request1 = new RefundRequest();
+            request1.setAmount(new BigDecimal("700.00"));
+            RefundRequest request2 = new RefundRequest();
+            request2.setAmount(new BigDecimal("700.00"));
+
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            List<Callable<Boolean>> tasks = List.of(
+                    () -> attemptRefund(original.getId(), request1),
+                    () -> attemptRefund(original.getId(), request2)
+            );
+            List<Future<Boolean>> futures = pool.invokeAll(tasks);
+            pool.shutdown();
+
+            long successCount = 0;
+            for (Future<Boolean> future : futures) {
+                if (future.get()) {
+                    successCount++;
+                }
+            }
+
+            // Only one of the two 700.00 refunds can fit within the 1000.00 balance - the
+            // FOR UPDATE lock in findByIdForUpdate() must serialize the two attempts so the
+            // cumulative check in the second one sees the first one's committed refund.
+            assertThat(successCount).isEqualTo(1);
+            BigDecimal totalRefunded = paymentRepository.sumRefundedAmount(original.getId());
+            assertThat(totalRefunded).isLessThanOrEqualTo(new BigDecimal("1000.00"));
+        } finally {
+            // The successful worker thread committed a real refund row (and the original
+            // payment above was force-committed too) - delete both for real so the shared
+            // dataset isn't polluted, regardless of test outcome.
+            MapSqlParameterSource params = new MapSqlParameterSource("originalId", original.getId().toString());
+            jdbcTemplate.update("DELETE FROM payment_status_history WHERE payment_id IN "
+                    + "(SELECT id FROM payments WHERE original_payment_id = :originalId OR id = :originalId)", params);
+            // Delete child refund rows before the parent original row - a single combined
+            // DELETE (children OR parent) can process the parent first within the same
+            // statement and violate the fk_payments_original_payment constraint.
+            jdbcTemplate.update("DELETE FROM payments WHERE original_payment_id = :originalId", params);
+            jdbcTemplate.update("DELETE FROM payments WHERE id = :originalId", params);
+            TestTransaction.flagForCommit();
+            TestTransaction.end();
+        }
+    }
+
+    private boolean attemptRefund(UUID originalId, RefundRequest request) {
+        try {
+            paymentService.createRefund(originalId, request);
+            return true;
+        } catch (InvalidRefundStateException e) {
+            return false;
+        }
     }
 
     // Distinct account names not used anywhere in the seeded data.sql, so these tests

@@ -1,10 +1,12 @@
 package com.bnd.payment_processing.payment.controller;
 
+import com.bnd.payment_processing.payment.dto.ApproveRefundRequest;
 import com.bnd.payment_processing.payment.dto.CreatePaymentRequest;
 import com.bnd.payment_processing.payment.dto.PaymentHistoryEntry;
 import com.bnd.payment_processing.payment.dto.PaymentResponse;
 import com.bnd.payment_processing.payment.dto.ProcessRequest;
 import com.bnd.payment_processing.payment.dto.RefundRequest;
+import com.bnd.payment_processing.payment.dto.RejectRefundRequest;
 import com.bnd.payment_processing.payment.service.PaymentService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -59,5 +61,17 @@ public class PaymentController {
     @ResponseStatus(HttpStatus.CREATED)
     public PaymentResponse createRefund(@PathVariable UUID id, @Valid @RequestBody RefundRequest request) {
         return paymentService.createRefund(id, request);
+    }
+
+    // Added 2026-08-05 (spec.md Section 10.8, v2.2)
+    @PostMapping("/{id}/refund/approve")
+    public PaymentResponse approveRefund(@PathVariable UUID id, @Valid @RequestBody ApproveRefundRequest request) {
+        return paymentService.approveRefund(id, request);
+    }
+
+    // Added 2026-08-05 (spec.md Section 10.9, v2.2)
+    @PostMapping("/{id}/refund/reject")
+    public PaymentResponse rejectRefund(@PathVariable UUID id, @Valid @RequestBody RejectRefundRequest request) {
+        return paymentService.rejectRefund(id, request);
     }
 }

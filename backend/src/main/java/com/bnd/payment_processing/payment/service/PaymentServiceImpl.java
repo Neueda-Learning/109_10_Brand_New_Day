@@ -4,13 +4,18 @@ import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
 import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
 import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
 import com.bnd.payment_processing.common.exception.PaymentNotFoundException;
+import com.bnd.payment_processing.common.exception.RefundNotApprovedException;
+import com.bnd.payment_processing.payment.dto.ApproveRefundRequest;
 import com.bnd.payment_processing.payment.dto.CreatePaymentRequest;
 import com.bnd.payment_processing.payment.dto.PaymentHistoryEntry;
 import com.bnd.payment_processing.payment.dto.PaymentMapper;
 import com.bnd.payment_processing.payment.dto.PaymentResponse;
 import com.bnd.payment_processing.payment.dto.ProcessRequest;
 import com.bnd.payment_processing.payment.dto.RefundRequest;
+import com.bnd.payment_processing.payment.dto.RejectRefundRequest;
+import com.bnd.payment_processing.payment.model.ApprovalStatus;
 import com.bnd.payment_processing.payment.model.Payment;
+import com.bnd.payment_processing.payment.model.PaymentMethod;
 import com.bnd.payment_processing.payment.model.PaymentStatus;
 import com.bnd.payment_processing.payment.model.PaymentStatusHistory;
 import com.bnd.payment_processing.payment.model.PaymentType;
@@ -67,6 +72,11 @@ public class PaymentServiceImpl implements PaymentService {
         payment.setStatus(PaymentStatus.CREATED);
         payment.setType(PaymentType.PAYMENT);
         payment.setOriginalPaymentId(null);
+        // paymentMethod (spec.md Section 10.1, v2.2): optional in the request, defaults
+        // to BANK_TRANSFER server-side if omitted. Reuses the existing parseEnum() helper.
+        payment.setPaymentMethod(request.getPaymentMethod() == null || request.getPaymentMethod().isBlank()
+                ? PaymentMethod.BANK_TRANSFER
+                : parseEnum(PaymentMethod.class, request.getPaymentMethod(), "paymentMethod"));
         payment.setCreatedAt(now);
         payment.setUpdatedAt(now);
 
@@ -108,6 +118,18 @@ public class PaymentServiceImpl implements PaymentService {
     public PaymentResponse processTransition(UUID id, ProcessRequest request) {
         Payment current = paymentRepository.findById(id)
                 .orElseThrow(() -> new PaymentNotFoundException(id));
+
+        // Refund approval gate (spec.md Section 8.1 rule 6, added 2026-08-05): a REFUND
+        // row can never advance past CREATED until a business user has approved it via
+        // POST /refund/approve. Guarded strictly on type == REFUND so PAYMENT-type
+        // transitions (M1/M2) are completely unaffected by this check.
+        if (current.getType() == PaymentType.REFUND
+                && current.getStatus() == PaymentStatus.CREATED
+                && current.getApprovalStatus() != ApprovalStatus.APPROVED) {
+            throw new RefundNotApprovedException(
+                    "Refund " + id + " cannot be processed until it has been approved (current approvalStatus: "
+                            + current.getApprovalStatus() + ")");
+        }
 
         PaymentStatus nextStatus = getNextStatus(current.getStatus(), request);
         validateTransition(current, nextStatus, request);
@@ -235,7 +257,11 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Transactional
     public PaymentResponse createRefund(UUID originalId, RefundRequest request) {
-        Payment original = paymentRepository.findById(originalId)
+        // Locked read (spec.md Section 8.3, added 2026-08-05): take a row lock on the
+        // original payment before computing the cumulative refunded total below, so two
+        // near-simultaneous refund requests against the same payment can't both pass the
+        // amount check before either commits.
+        Payment original = paymentRepository.findByIdForUpdate(originalId)
                 .orElseThrow(() -> new PaymentNotFoundException(originalId));
 
         if (original.getType() != PaymentType.PAYMENT) {
@@ -263,7 +289,9 @@ public class PaymentServiceImpl implements PaymentService {
         refund.setId(UUID.randomUUID());
         // Refunds have no client-supplied idempotency key (RefundRequest doesn't carry
         // one) but the column is NOT NULL UNIQUE, so generate a synthetic one.
-        refund.setIdempotencyKey("refund-" + refund.getId());
+        refund.setIdempotencyKey(request.getIdempotencyKey() != null && !request.getIdempotencyKey().isBlank()
+                ? request.getIdempotencyKey()
+                : "refund-" + refund.getId());
         // A refund reverses the money flow: the original payee now sends money back to
         // the original payer, so source/destination are swapped relative to the original.
         refund.setSourceAccount(original.getDestinationAccount());
@@ -273,10 +301,23 @@ public class PaymentServiceImpl implements PaymentService {
         refund.setStatus(PaymentStatus.CREATED);
         refund.setType(PaymentType.REFUND);
         refund.setOriginalPaymentId(original.getId());
+        // Approval gate (spec.md Section 8.1 rule 6, added 2026-08-05): every new refund
+        // starts PENDING_APPROVAL and cannot advance past CREATED until approved.
+        refund.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+        refund.setPaymentMethod(original.getPaymentMethod() == null ? PaymentMethod.BANK_TRANSFER : original.getPaymentMethod());
         refund.setCreatedAt(now);
         refund.setUpdatedAt(now);
 
-        paymentRepository.insert(refund);
+        // Refund idempotency (spec.md Section 10.6, added 2026-08-05): mirrors the same
+        // duplicate-key-catch-and-refetch short-circuit pattern used by createPayment(),
+        // so a double-submitted refund request can't create two rows.
+        try {
+            paymentRepository.insert(refund);
+        } catch (DuplicateKeyException e) {
+            Payment existing = paymentRepository.findByIdempotencyKey(refund.getIdempotencyKey())
+                    .orElseThrow(() -> e);
+            throw new DuplicatePaymentException(existing);
+        }
 
         PaymentStatusHistory initialHistory = new PaymentStatusHistory();
         initialHistory.setId(UUID.randomUUID());
@@ -289,6 +330,59 @@ public class PaymentServiceImpl implements PaymentService {
         paymentStatusHistoryRepository.insert(initialHistory);
 
         return PaymentMapper.toResponse(refund);
+    }
+
+    @Override
+    @Transactional
+    public PaymentResponse approveRefund(UUID refundId, ApproveRefundRequest request) {
+        Payment refund = paymentRepository.findById(refundId)
+                .orElseThrow(() -> new PaymentNotFoundException(refundId));
+
+        // Conditional update (spec.md Section 10.8, added 2026-08-05): only applies when
+        // type=REFUND and approval_status=PENDING_APPROVAL. A 0-row result means the
+        // refund is not a REFUND row, or was already approved/rejected.
+        int rowsAffected = paymentRepository.approveRefund(refundId, request.getApprovedBy(), Instant.now());
+        if (rowsAffected == 0) {
+            throw new RefundNotApprovedException(
+                    "Refund " + refundId + " cannot be approved (must be type=REFUND with approvalStatus=PENDING_APPROVAL, was type="
+                            + refund.getType() + ", approvalStatus=" + refund.getApprovalStatus() + ")");
+        }
+
+        Payment updated = paymentRepository.findById(refundId)
+                .orElseThrow(() -> new PaymentNotFoundException(refundId));
+        return PaymentMapper.toResponse(updated);
+    }
+
+    @Override
+    @Transactional
+    public PaymentResponse rejectRefund(UUID refundId, RejectRefundRequest request) {
+        Payment refund = paymentRepository.findById(refundId)
+                .orElseThrow(() -> new PaymentNotFoundException(refundId));
+
+        // Conditional update (spec.md Section 10.9, added 2026-08-05): only applies when
+        // type=REFUND and approval_status=PENDING_APPROVAL; also moves status straight to
+        // FAILED with error_code=REFUND_REJECTED in the same atomic update.
+        int rowsAffected = paymentRepository.rejectRefund(refundId, request.getReason());
+        if (rowsAffected == 0) {
+            throw new RefundNotApprovedException(
+                    "Refund " + refundId + " cannot be rejected (must be type=REFUND with approvalStatus=PENDING_APPROVAL, was type="
+                            + refund.getType() + ", approvalStatus=" + refund.getApprovalStatus() + ")");
+        }
+
+        Instant now = Instant.now();
+        PaymentStatusHistory historyEntry = new PaymentStatusHistory();
+        historyEntry.setId(UUID.randomUUID());
+        historyEntry.setPaymentId(refundId);
+        historyEntry.setFromStatus(PaymentStatus.CREATED);
+        historyEntry.setToStatus(PaymentStatus.FAILED);
+        historyEntry.setChangedAt(now);
+        historyEntry.setTriggeredBy(request.getRejectedBy());
+        historyEntry.setNote("REFUND_REJECTED: " + request.getReason());
+        paymentStatusHistoryRepository.insert(historyEntry);
+
+        Payment updated = paymentRepository.findById(refundId)
+                .orElseThrow(() -> new PaymentNotFoundException(refundId));
+        return PaymentMapper.toResponse(updated);
     }
 
     @Override
