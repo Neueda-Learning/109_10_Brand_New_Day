@@ -36,7 +36,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link PaymentServiceImpl} (M1's create/get + M3's refund and
- * idempotency logic). Repositories are mocked - no database needed.
+ * idempotency logic + M4's search logic). Repositories are mocked - no database needed.
  */
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceImplTest {
@@ -111,6 +111,18 @@ class PaymentServiceImplTest {
                 .isInstanceOf(DuplicatePaymentException.class)
                 .satisfies(ex -> assertThat(((DuplicatePaymentException) ex).getExistingPayment()).isEqualTo(existing));
 
+        verify(paymentStatusHistoryRepository, never()).insert(any());
+    }
+
+    @Test
+    void createPayment_sameSourceAndDestinationAccount_throwsIllegalArgumentException() {
+        CreatePaymentRequest request = newCreateRequest();
+        request.setDestinationAccount(request.getSourceAccount());
+
+        assertThatThrownBy(() -> service.createPayment(request))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verify(paymentRepository, never()).insert(any(Payment.class));
         verify(paymentStatusHistoryRepository, never()).insert(any());
     }
 

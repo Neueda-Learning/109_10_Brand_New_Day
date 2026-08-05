@@ -40,7 +40,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentStatusHistoryRepository paymentStatusHistoryRepository;
 
     public PaymentServiceImpl(PaymentRepository paymentRepository,
-                               PaymentStatusHistoryRepository paymentStatusHistoryRepository) {
+                              PaymentStatusHistoryRepository paymentStatusHistoryRepository) {
         this.paymentRepository = paymentRepository;
         this.paymentStatusHistoryRepository = paymentStatusHistoryRepository;
     }
@@ -48,6 +48,13 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Transactional
     public PaymentResponse createPayment(CreatePaymentRequest request) {
+        // M1 validation rule (spec.md Section 9): sourceAccount must differ from
+        // destinationAccount. IllegalArgumentException is mapped to 400
+        // VALIDATION_ERROR by GlobalExceptionHandler.
+        if (request.getSourceAccount().equals(request.getDestinationAccount())) {
+            throw new IllegalArgumentException("sourceAccount and destinationAccount must be different");
+        }
+
         Instant now = Instant.now();
 
         Payment payment = new Payment();
