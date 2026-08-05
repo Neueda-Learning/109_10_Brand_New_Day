@@ -103,12 +103,11 @@ public class PaymentServiceImpl implements PaymentService {
                 .orElseThrow(() -> new PaymentNotFoundException(id));
 
         PaymentStatus nextStatus = getNextStatus(current.getStatus(), request);
-
         validateTransition(current, nextStatus, request);
 
         String errorCode = null;
         if (nextStatus == PaymentStatus.FAILED) {
-            errorCode = request.getErrorCode();
+            errorCode = request.getErrorCode().trim();
         }
 
         int rowsAffected = paymentRepository.updateStatusIfCurrent(
@@ -131,8 +130,17 @@ public class PaymentServiceImpl implements PaymentService {
         historyEntry.setFromStatus(current.getStatus());
         historyEntry.setToStatus(nextStatus);
         historyEntry.setChangedAt(now);
-        historyEntry.setTriggeredBy("SYSTEM");
-        historyEntry.setNote(request != null ? request.getNote() : null);
+        historyEntry.setTriggeredBy(SYSTEM_TRIGGER);
+
+        String requestNote = (request != null && request.getNote() != null && !request.getNote().isBlank())
+                ? request.getNote().trim()
+                : null;
+        if (nextStatus == PaymentStatus.FAILED) {
+            historyEntry.setNote(requestNote == null ? errorCode : requestNote + " | errorCode=" + errorCode);
+        } else {
+            historyEntry.setNote(requestNote);
+        }
+
         paymentStatusHistoryRepository.insert(historyEntry);
 
         Payment updated = paymentRepository.findById(id)
