@@ -37,17 +37,31 @@ agent) to see current project state at a glance.
 | Shared dataset (data.sql seed) | Team | DONE | — | — | DONE | 491 payments / 1661 history rows generated via `scripts/generate_data_sql.py` — see Section 11.5 |
 | M1 - Creation & Validation | Poornima | DONE | DONE | DONE | IN_PROGRESS | `POST /api/payments` + `GET /api/payments/{id}` implemented; `index.html`/`index.js` wired to real API (PR #1, merged) |
 | M2 - Status Engine & Audit Trail | Neha | DONE | DONE | DONE | IN_PROGRESS | `process`/`history` endpoints implemented; `audit.html`/`audit.js` wired to real API (PR #3, merged) |
-| M3 - Idempotency, Errors, Refund | Tharan | DONE | DONE | DONE | IN_PROGRESS | Idempotency short-circuit, refund rules, full `GlobalExceptionHandler` mapping implemented; `detail.html`/`detail.js` wired to real API (PR #2, merged) |
-| M4 - Query API, Lifecycle UI, Design System, API Docs | Karuna | DONE | DONE | DONE | IN_PROGRESS | `GET /api/payments` filter/pagination + `lifecycle-timeline.js`/`dashboard.html`/`history.html` implemented and unit-tested; on `feature/m4-lifecycle-ui`, not yet merged to `main` |
+| M3 - Idempotency, Errors, Refund | Tharan | DONE | DONE | DONE | IN_PROGRESS | Idempotency short-circuit, refund rules, full `GlobalExceptionHandler` mapping implemented; `detail.html`/`detail.js` wired to real API (PR #2, merged). v2.2 (`feature/m3-refund-approval`): payment method tagging, refund approval workflow, refund idempotency key, `FOR UPDATE` concurrency fix — implemented and tested 2026-08-05, not yet merged to `main` |
+| M4 - Query API, Lifecycle UI, Design System, API Docs | Karuna | DONE | DONE | DONE | IN_PROGRESS | `GET /api/payments` filter/pagination + `lifecycle-timeline.js`/`dashboard.html`/`history.html` implemented and unit-tested; on `feature/m4-lifecycle-ui`, not yet merged to `main`. **Frontend UI portion superseded 2026-08-05** — see the full frontend redesign note below (`ops.html` plan replaced by unified `frontend-business/index.html`, built and using client-side KPI computation pending the real `/insights` endpoint, which remains `NOT_STARTED`) |
 
 Status values: `NOT_STARTED`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
 Overall project phase: **Phase 2 (Backend/Frontend Impl) — DONE for M1-M4 on their respective branches. Phase 3 (cross-module integration validation, e.g. end-to-end refund/process/query flows together, PR review, merge of `feature/m4-lifecycle-ui` into `main`) is IN_PROGRESS.**
 
 **v2.2 scope (added 2026-08-05):** payment method, refund approval workflow, insights
 endpoint, and the unified business frontend (Sections 4/5/7/8.1/9/10/14/16) are
-**spec-approved but implementation NOT_STARTED** — tracked via the new
-`feature/m3-refund-approval`/`feature/shared-dataset-v2`/`feature/m4-insights-api`/
-`feature/m4-business-ui` branches (Section 16).
+**spec-approved**, and `feature/m3-refund-approval` (payment method tagging + refund
+approval workflow + refund idempotency + concurrency fix) is now **DONE** (backend +
+tests; see 2026-08-05 Progress Log entry below). The remaining v2.2 branches
+(`feature/shared-dataset-v2`, `feature/m4-insights-api`) are still **NOT_STARTED**.
+
+**Full frontend redesign (added 2026-08-05, later same day):** both `frontend-user/`
+and `frontend-business/` were rebuilt from scratch into single unified, Bootstrap-styled,
+HSBC-branded pages (`index.html`/`script.js`/`styles.css` in each folder) with a
+GPay/PhonePe-style layout, animated lifecycle timeline, and a Demo/Debug mode toggle —
+**DONE** (frontend only; see Section 14 for the as-built layout, Section 18 for the full
+changelog). This work was done ahead of and independent from `feature/m4-insights-api`;
+both new pages compute KPI/insight data client-side via a swappable `computeInsights()`
+helper until the real `GET /api/payments/insights` endpoint exists. The old
+`feature/m4-business-ui` plan name `ops.html`/`ops.js`/`ops.css` was **superseded** by
+`frontend-business/index.html`/`script.js`/`styles.css` to mirror the `frontend-user`
+naming; all 6 legacy pages (`frontend-user/{history,detail}.html`+`.js`,
+`frontend-business/{dashboard,audit}.html`+`.js`) were deleted.
 
 ## 3. Session Context Block (Optional — for AI session hygiene)
 
@@ -609,22 +623,30 @@ route to `PaymentQueryController`, not `PaymentController`'s `{id}` lookup (Sect
   status-badge colors (one badge style per `PaymentStatus`, plus 3 new badge colors for
   `PENDING_APPROVAL`/`APPROVED`/`REJECTED` added 2026-08-05), used by every page in both
   `frontend-user` and `frontend-business`. See Section 14.2 for the full brand/theming
-  guidelines (light/dark mode, HSBC-style palette, icon rules — added 2026-08-05).
+  guidelines (light/dark mode, HSBC-style palette, icon rules — added 2026-08-05). **DONE.**
 - `frontend/frontend-shared/lifecycle-timeline.js` — reusable vanilla-JS component that
   renders a `payment_status_history` array as a visual timeline, extended to also show
-  the refund approval sub-state (added 2026-08-05). Consumed by M2's `audit.html`/new
-  `ops.html` and M1's `history.html`.
+  the refund approval sub-state via an optional 3rd argument (added 2026-08-05). **DONE.**
+  Consumed by both unified pages below.
 - `frontend/frontend-shared/app-mode.js` (new, added 2026-08-05) — shared Debug/Demo mode
-  toggle + `localStorage` persistence + request/response logging helper. See Section 14.3.
-- **(Added 2026-08-05) `frontend/frontend-business/ops.html`/`ops.js`/`ops.css`** — new
-  unified business dashboard **replacing** `dashboard.html`/`dashboard.js`/`audit.html`/
-  `audit.js` (old files deleted once `ops.*` covers their functionality). Single page:
-  KPI cards (from `/insights`) → filterable/searchable payments table (incl.
-  `paymentMethod`/`approvalStatus` filters) → detail panel with full history timeline →
-  refund Approve/Reject actions. Loads Bootstrap 5 + Bootstrap Icons via CDN (Section 4
-  exception). See Section 14.1 for the full layout plan.
-- `frontend/frontend-user/history.html` — user-facing simplified history view (reuses
-  `lifecycle-timeline.js`).
+  toggle + light/dark theme toggle + `localStorage` persistence + auto-advance loop +
+  request/response inspector helper. See Section 14.3. **DONE.**
+- **(Added 2026-08-05) `frontend/frontend-business/index.html`/`script.js`/`styles.css`**
+  — new unified business dashboard that **replaced** `dashboard.html`/`dashboard.js`/
+  `audit.html`/`audit.js` (old files deleted). **DONE.** Renamed from the originally
+  planned `ops.html`/`ops.js`/`ops.css` to mirror `frontend-user`'s naming. Single page:
+  KPI cards (client-side `computeInsights()`, swappable for the real `/insights`
+  endpoint once implemented) → filterable/searchable payments table (existing
+  `status`/`type`/`sourceAccount`/`destinationAccount`/`fromDate`/`toDate` filters only —
+  `paymentMethod`/`approvalStatus` filters were **not** added since that requires the
+  still-`NOT_STARTED` `feature/m4-insights-api` backend work) → offcanvas detail panel
+  with full history timeline → refund Approve/Reject actions. Loads Bootstrap 5 +
+  Bootstrap Icons via CDN (Section 4 exception).
+- **(Added 2026-08-05) `frontend/frontend-user/index.html`/`script.js`/`styles.css`** —
+  rebuilt from scratch into a single unified consumer app (payment creation with
+  auto-generated `idempotencyKey`, recent transactions list with inline
+  expand/refund/timeline, KPI cards). **DONE.** Replaced the old `index.js` plus
+  `history.html`/`history.js`/`detail.html`/`detail.js` (all deleted).
 
 **Phase 1 tasks (backbone):**
 - [x] Create `PaymentQueryController` skeleton (stub method only).
@@ -642,10 +664,12 @@ route to `PaymentQueryController`, not `PaymentController`'s `{id}` lookup (Sect
       `PaymentInsightsResponse` + analytics repository/service + `GET
       /api/payments/insights`; extend `GET /api/payments` filters with `paymentMethod`/
       `approvalStatus`; add the routing collision test noted above.
-- [ ] (Added 2026-08-05, branch `feature/m4-business-ui`) Build `ops.html`/`ops.js`/
-      `ops.css` replacing `dashboard.*`/`audit.*`; rework `design-tokens.css` per Section
-      14.2; build `app-mode.js` + the Debug/Demo toggle per Section 14.3; delete the old
-      4 files once `ops.*` fully covers their functionality.
+- [x] (Added 2026-08-05, frontend redesign) Build `frontend-business/index.html`/
+      `script.js`/`styles.css` replacing `dashboard.*`/`audit.*`; rework
+      `design-tokens.css` per Section 14.2; build `app-mode.js` + the Debug/Demo toggle
+      per Section 14.3; delete the old 4 files. **DONE** — renamed from the originally
+      planned `ops.html`/`ops.js`/`ops.css`; KPI cards use client-side
+      `computeInsights()` pending `feature/m4-insights-api` above.
 
 **Depends on:** All other modules' endpoints being stable enough to document; M1-M3's
 pages consuming the shared CSS/JS files without modification.
@@ -671,8 +695,8 @@ tested, independent of the rest of its module.
 | `/api/payments/{id}/history` | GET | M2 | Get full status history timeline | TESTED |
 | `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | TESTED |
 | `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | TESTED |
-| `/api/payments/{id}/refund/approve` | POST | M3 | Approve a pending refund (added 2026-08-05) | NOT_IMPLEMENTED |
-| `/api/payments/{id}/refund/reject` | POST | M3 | Reject a pending refund (added 2026-08-05) | NOT_IMPLEMENTED |
+| `/api/payments/{id}/refund/approve` | POST | M3 | Approve a pending refund (added 2026-08-05) | TESTED |
+| `/api/payments/{id}/refund/reject` | POST | M3 | Reject a pending refund (added 2026-08-05) | TESTED |
 | `/api/payments/insights` | GET | M4 | Aggregate analytics for business dashboard (added 2026-08-05) | NOT_IMPLEMENTED |
 
 Endpoint status values: `NOT_IMPLEMENTED`, `IMPLEMENTED` (works, not yet tested),
@@ -1019,30 +1043,36 @@ frontend/
   frontend-shared/
     design-tokens.css
     lifecycle-timeline.js
+    app-mode.js         (added 2026-08-05 - Demo/Debug + theme toggle)
   frontend-user/
-    index.html       (M1 - new payment form)
-    history.html      (M4 - user history view)
-    detail.html       (M3 - payment detail + refund action)
+    index.html          (unified consumer app - create payment, recent
+                          transactions, inline detail/refund/timeline, KPI cards)
+    script.js
+    styles.css
   frontend-business/
-    dashboard.html    (M4 - filterable payments list)
-    audit.html        (M2 - audit trail / history timeline)
+    index.html          (unified ops app - KPI cards, filter/search table,
+                          offcanvas detail + lifecycle timeline, refund approve/reject)
+    script.js
+    styles.css
 ```
 
 Frontend conventions:
-- No build tools, no bundlers, no frameworks — plain `<script>`/`<link>` tags.
+- No build tools, no bundlers, no frameworks except Bootstrap 5 + Bootstrap Icons via
+  CDN `<link>`/`<script>` tags (Section 4 exception).
 - Every page includes `frontend-shared/design-tokens.css` for consistent styling.
-- Shared behavior (e.g. rendering a history timeline) lives in
-  `frontend-shared/lifecycle-timeline.js` and is imported by any page that needs it —
-  do not copy-paste timeline rendering logic between pages.
-- Each `frontend-user`/`frontend-business` page has its own small dedicated JS file
-  (e.g. `index.js` next to `index.html`) for page-specific logic (form submission,
-  fetch calls) — keep page logic out of the shared files.
+- Shared behavior (rendering a history timeline, Demo/Debug mode, theme toggle) lives in
+  `frontend-shared/lifecycle-timeline.js`/`app-mode.js` and is imported by both apps —
+  do not copy-paste this logic between pages.
+- Each app has one dedicated `script.js`/`styles.css` next to its `index.html` for
+  page-specific logic (form submission, fetch calls, rendering) — keep page logic out of
+  the shared files.
 
-**Planned v2.2 change (added 2026-08-05):** `frontend-business/dashboard.html`/
-`dashboard.js`/`audit.html`/`audit.js` above will be replaced by a single
-`ops.html`/`ops.js`/`ops.css`, and a new `frontend-shared/app-mode.js` will be added —
-see Section 14.1/14.3 for the full plan. This tree reflects the current, already-built
-Phase 1 state; it will be updated again once that migration lands.
+**v2.2 frontend redesign (added 2026-08-05, DONE):** `frontend-business/dashboard.html`/
+`dashboard.js`/`audit.html`/`audit.js` and `frontend-user/{history,detail}.html`+`.js`
+were all deleted and replaced by the single unified `index.html`/`script.js`/`styles.css`
+pair in each app shown above (originally planned as `ops.html`/`ops.js`/`ops.css` for
+the business app — renamed for naming consistency). See Section 14.1/14.3 for the full
+layout/behavior and Section 18 for the changelog.
 
 ### 11.3 Shared Setup Tasks
 
@@ -1169,43 +1199,50 @@ full detail. Summary:
 
 ## 14. Frontend Architecture
 
-Two static, framework-free apps plus a shared layer — see Section 11.2 for the file tree.
+Two static, framework-free (except Bootstrap 5 + Bootstrap Icons via CDN) apps plus a
+shared layer — see Section 11.2 for the file tree. **Both apps were fully redesigned as
+single unified pages on 2026-08-05; the descriptions below reflect the as-built state.**
 
-- **`frontend-user/`** — the end-customer app: create a payment (`index.html`), view a
-  simplified history (`history.html`), view details and trigger a refund (`detail.html`).
-  Owned/built by you personally; not part of M1-M4 execution scope going forward.
-- **`frontend-business/`** — the internal/business-operator app. **Current state:**
-  searchable payments dashboard (`dashboard.html`), full audit trail viewer
-  (`audit.html`). **Planned (added 2026-08-05, see 14.1):** replaced by a single unified
-  `ops.html`/`ops.js`/`ops.css` page.
+- **`frontend-user/`** — the end-customer app: a single `index.html` covering payment
+  creation (auto-generated idempotency key, no manual input), a recent-transactions list
+  with inline expandable detail/refund/lifecycle-timeline panels, and client-side KPI
+  cards. Owned/built by you personally; not part of M1-M4 execution scope going forward.
+- **`frontend-business/`** — the internal/business-operator app. A single `index.html`
+  covering KPI cards, a filterable/searchable payments table, and an offcanvas detail
+  panel with the lifecycle timeline and refund Approve/Reject actions.
 - **`frontend-shared/`** — design tokens (`design-tokens.css`) and the reusable
-  `lifecycle-timeline.js` component, consumed by both apps, plus the new (added
-  2026-08-05) `app-mode.js` (Section 14.3). No page-specific logic belongs here.
+  `lifecycle-timeline.js` component, consumed by both apps, plus `app-mode.js` (Section
+  14.3). No page-specific logic belongs here.
 
-Modularity rule: page-specific JS lives next to its HTML file (e.g. `dashboard.js` beside
-`dashboard.html`); anything reused across 2+ pages moves into `frontend-shared/`.
+Modularity rule: page-specific JS lives next to its HTML file (`script.js` beside
+`index.html` in each app); anything reused across both apps moves into `frontend-shared/`.
 
-### 14.1 Unified Business Frontend (added 2026-08-05)
+### 14.1 Unified Business Frontend (added 2026-08-05, DONE)
 
-`dashboard.html`/`dashboard.js`/`audit.html`/`audit.js` are replaced by one page,
-`frontend/frontend-business/ops.html` (+ `ops.js`/`ops.css`), owned by M4:
+`dashboard.html`/`dashboard.js`/`audit.html`/`audit.js` were replaced by one page,
+`frontend/frontend-business/index.html` (+ `script.js`/`styles.css`) — renamed from the
+originally planned `ops.html`/`ops.js`/`ops.css` to mirror `frontend-user`'s naming:
 
-1. **KPI section** — cards fed by `GET /api/payments/insights` (Section 10.10): total
-   volume, success rate, refund rate, pending-approval count.
-2. **Search/filter table** — carries over the existing `dashboard.js` filter/search
-   logic (Section 9 M4), extended with `paymentMethod`/`approvalStatus` filters.
-3. **Detail panel** — selecting a row shows its full history timeline (carries over
-   `audit.js`/`lifecycle-timeline.js` rendering), plus `paymentMethod`/`approvalStatus`
-   fields.
+1. **KPI section** — cards fed by a client-side `computeInsights()` helper aggregating
+   `GET /api/payments` results (swappable for the real `GET /api/payments/insights`
+   endpoint once `feature/m4-insights-api` is implemented — currently `NOT_STARTED`):
+   total volume, success rate, pending-approval count.
+2. **Search/filter table** — carries over the existing filter/search logic (Section 9
+   M4) using the currently-implemented filters (`status`/`type`/`sourceAccount`/
+   `destinationAccount`/`fromDate`/`toDate`); `paymentMethod`/`approvalStatus` filters are
+   **not yet added** (blocked on `feature/m4-insights-api`).
+3. **Detail panel** — a Bootstrap offcanvas showing full payment fields (incl.
+   `paymentMethod`/`approvalStatus`/`rejectionReason`) plus the full history timeline via
+   `lifecycle-timeline.js`.
 4. **Refund approval actions** — `Approve`/`Reject` buttons, shown only when
    `type = "REFUND" && approvalStatus = "PENDING_APPROVAL"`, calling Section 10.8/10.9.
 5. Loaded via Bootstrap 5 + Bootstrap Icons CDN `<link>`/`<script>` tags (Section 4
    exception) plus the shared `design-tokens.css`/`lifecycle-timeline.js`/`app-mode.js`.
 
-### 14.2 Brand & Theming Guidelines (added 2026-08-05)
+### 14.2 Brand & Theming Guidelines (added 2026-08-05, DONE)
 
-Applies to `frontend-shared/design-tokens.css`; consumed by `ops.html` now, available
-for `frontend-user` pages too.
+Applies to `frontend-shared/design-tokens.css`; consumed by both unified `index.html`
+pages.
 
 **Theme:** light mode is the default and always the initial theme on first load. Dark
 mode is optional and user-toggled (a switch in the page header), persisted via
@@ -1234,7 +1271,7 @@ properties in `design-tokens.css` — no separate stylesheet.
 - Monochrome via `currentColor`, consistent sizing (`1em`/`1.25em`), no multi-color/
   gradient/3D icons.
 - No decorative filler icons — every icon maps to a real state (payment status,
-  approval status, action button) from one fixed lookup table in `ops.js`.
+  approval status, action button) from the fixed set used in each app's `script.js`.
 - Flat cards, 1px borders, restrained shadow (existing `--shadow-card` token), consistent
   spacing scale (existing `--space-1..6`) — avoid busy layouts or excessive rounded
   corners/gradients.
@@ -1243,13 +1280,13 @@ properties in `design-tokens.css` — no separate stylesheet.
 changes; timeline step reveal via fade+slide-up; progress-bar fill via `width`/`transform`
 transition. No bounce/elastic easing, no long spinners, no celebratory animations.
 
-### 14.3 Debug / Demo Mode Toggle (added 2026-08-05)
+### 14.3 Debug / Demo Mode Toggle (added 2026-08-05, DONE)
 
 A page-header toggle (`Demo` / `Debug`), persisted via `localStorage` (`mode=demo|debug`,
-default `demo`), implemented once in shared `frontend-shared/app-mode.js` so both
-`ops.js` and any `frontend-user` page can reuse the same toggle/logging logic. **Requires
-no backend changes** — both modes call the exact same endpoints in Section 10; only the
-frontend orchestration/presentation differs.
+default `demo`), implemented once in shared `frontend-shared/app-mode.js` so both unified
+`script.js` files reuse the same toggle/logging logic. **Requires no backend changes** —
+both modes call the exact same endpoints in Section 10; only the frontend
+orchestration/presentation differs.
 
 - **Demo mode (default):** after creating a payment/refund, the UI auto-advances it
   end-to-end (`CREATED -> VALIDATED -> SENT -> COMPLETED`/`FAILED`) via repeated calls to
@@ -1300,8 +1337,10 @@ Branch naming:
   the new columns (Section 11.5).
 - (Added 2026-08-05) `feature/m4-insights-api` — analytics endpoint + extended search
   filters (Section 9 M4, Section 10.10).
-- (Added 2026-08-05) `feature/m4-business-ui` — unified `ops.html` + brand rework +
-  Debug/Demo toggle (Section 14.1/14.2/14.3).
+- (Added 2026-08-05) `feature/m4-business-ui` — unified `frontend-business/index.html` +
+  brand rework + Debug/Demo toggle (Section 14.1/14.2/14.3). **Implemented 2026-08-05**
+  (frontend only, on top of `main` locally; not yet committed/branched per user
+  instruction to hold off on git operations until asked).
 
 Recommended merge order for the 2026-08-05 additions (each depends on the schema from
 the first): `feature/m3-refund-approval` -> `feature/shared-dataset-v2` ->
@@ -1332,6 +1371,9 @@ history — keep entries short and factual.
 | 2026-08-04 | M3 (Idempotency, Errors, Refund) implemented: `PaymentServiceImpl.createRefund()` (account swap, cumulative refund-amount cap, refund-of-refund ban, non-`COMPLETED` rejection), idempotent `createPayment()` duplicate-key short-circuit, `JdbcPaymentRepository.sumRefundedAmount()`, full `GlobalExceptionHandler` implementation (404/409/400/500 incl. the 200-with-existing-payment duplicate short-circuit), and `detail.html`/`detail.js` refund UI. Added test-scope dependency `org.springframework.boot:spring-boot-webmvc-test` (Section 6.2) — required because Spring Boot 4.1.0 relocated `@WebMvcTest`/`@AutoConfigureMockMvc` out of `spring-boot-test-autoconfigure`; not part of the original whitelist but needed for `GlobalExceptionHandlerTest`. 16 unit/MockMvc tests passing (`PaymentServiceImplTest`, `GlobalExceptionHandlerTest`); `JdbcPaymentRepositoryTest` written, pending a live MySQL run. |
 | 2026-08-04 | M1/M2/M3 merged to `main` via PR #1/#3/#2 respectively. `main` briefly had a broken build after PR #3's stash-pop conflict resolution left literal `<<<<<<<`/`=======`/`>>>>>>>` markers in `JdbcPaymentRepository`/`JdbcPaymentStatusHistoryRepository`/`PaymentServiceImpl` plus a stale local `toResponse()` call; fixed on `main` by PR #4 (`hotfix/main-compile-fix`, commit `b0c5129`). M4 (`feature/m4-lifecycle-ui`) implemented `GET /api/payments` search/filter/pagination end-to-end (`JdbcPaymentRepository.search`/`countSearch`, `PaymentServiceImpl.searchPayments` with enum validation), `lifecycle-timeline.js`, `dashboard.html`/`dashboard.js`, `history.html`/`history.js`, plus unit tests for search/pagination/filtering/validation — but this branch had not yet merged `main`'s PR #4 hotfix. Merged `origin/main` into `feature/m4-lifecycle-ui`: one trivial import-only conflict in `JdbcPaymentRepository.java` (this branch's full search implementation vs. main's stub), resolved by keeping this branch's imports. Re-verified after merge: `mvn compile` succeeds, all 29 tests pass (`GlobalExceptionHandlerTest`, `JdbcPaymentRepositoryTest`, `PaymentServiceImplTest`). Corrected Section 2 dashboard above, which had been stale (still showing Phase 2 as `NOT_STARTED` for all modules despite merged, implemented, tested work) — spec updates had lagged actual progress. Remaining work: merge `feature/m4-lifecycle-ui` into `main` via PR, then Phase 3 end-to-end integration validation across all endpoints together. |
 | 2026-08-05 | v2.2: recorded the payment-method/refund-approval/insights/unified-business-frontend plan (Sections 4, 5, 7, 8.1 rule 6, 9 [M3/M4], 10.7-10.10, 11.2, 14.1-14.3, 15, 16) — **spec-only, no code changes yet**. Adds: `payment_method`/`approval_status`/`approved_by`/`approved_at`/`rejection_reason` columns; a refund approval gate (`POST /refund/approve`, `POST /refund/reject`, `RefundNotApprovedException`/`REFUND_NOT_APPROVED`); optional `idempotencyKey` on `RefundRequest` (reusing the existing idempotency short-circuit pattern); a documented concurrency fix for `createRefund()` (`SELECT ... FOR UPDATE` before the cumulative-amount check); a new `GET /api/payments/insights` analytics endpoint plus `paymentMethod`/`approvalStatus` search filters; a Bootstrap 5 + Bootstrap Icons CDN-only frontend exception (Section 4); a unified `ops.html`/`ops.js`/`ops.css` business frontend plan replacing `dashboard.html`/`audit.html`; HSBC-style light-default/dark-optional brand guidelines (Section 14.2); and a Debug/Demo mode toggle plan (`app-mode.js`, frontend-only, no backend change, Section 14.3). New branches recorded in Section 16: `feature/m3-refund-approval`, `feature/shared-dataset-v2`, `feature/m4-insights-api`, `feature/m4-business-ui`, with a recommended merge order. Section 2 dashboard annotated to show this scope as spec-approved/`NOT_STARTED`. Nothing in this entry has been implemented in code yet. |
+| 2026-08-05 | `feature/m3-refund-approval` implemented and tested (backend). Schema: added `payment_method`/`approval_status`/`approved_by`/`approved_at`/`rejection_reason` to `payments` (nullable/defaulted, non-breaking). New `PaymentMethod`/`ApprovalStatus` enums, `RefundNotApprovedException`, `ApproveRefundRequest`/`RejectRefundRequest` DTOs; `Payment`/`PaymentResponse`/`PaymentMapper` extended to round-trip the 5 new fields; `CreatePaymentRequest.paymentMethod` and `RefundRequest.idempotencyKey` added as optional fields (existing callers unaffected). Repository: `JdbcPaymentRepository` insert/mapRow extended for new columns; added `findByIdForUpdate` (`SELECT ... FOR UPDATE`) plus conditional `approveRefund`/`rejectRefund` updates gated on `type='REFUND' AND approval_status='PENDING_APPROVAL'`. Service: `createRefund()` now locks the original row before the cumulative refund-amount check (closing the prior race window), sets new refunds to `PENDING_APPROVAL`, inherits `paymentMethod` from the original, and supports refund idempotency via `idempotencyKey` (duplicate-key catch + refetch, mirroring the existing `createPayment()` pattern); `processTransition()` now blocks a `REFUND` payment's `CREATED -> VALIDATED` move unless `approvalStatus == APPROVED` (guarded on `type == REFUND`, so M1/M2 payment-type transitions are unaffected), throwing `RefundNotApprovedException` -> `409 REFUND_NOT_APPROVED`; new `approveRefund()`/`rejectRefund()` service methods added (reject also appends a `payment_status_history` row). API: new `POST /api/payments/{id}/refund/approve` and `POST /api/payments/{id}/refund/reject` endpoints; `GlobalExceptionHandler` maps `RefundNotApprovedException` to `409`/`REFUND_NOT_APPROVED`. Tests: ~29 new/updated tests across `PaymentServiceImplTest` (approval gate, approve/reject, refund idempotency, paymentMethod defaulting), `JdbcPaymentRepositoryTest` (lock/approve/reject conditional updates plus a real two-thread DB concurrency test proving only one of two simultaneous over-limit refund requests succeeds), and `GlobalExceptionHandlerTest` (409 mapping on process/approve/reject) — full suite green, no regressions in existing M1/M2/M3 tests. Remaining for this branch: `detail.html`/`detail.js` cosmetic updates (approval-status messaging, payment-method display) are frontend-only and not yet done; M3's approve/reject UI itself is out of scope here (belongs to M4's `ops.html` per Section 14.1). |
+| 2026-08-05 | Full frontend redesign (both `frontend-user/` and `frontend-business/`) implemented and verified, ahead of/independent from `feature/m4-insights-api`. **Shared foundation:** `design-tokens.css` rewritten with the HSBC red primary (`#DB0011`), a `[data-theme="dark"]` override block (dark surfaces `#121212`/`#1E1E1E`, `localStorage` key `theme`), and 3 new approval-status badge classes (`PENDING_APPROVAL`/`APPROVED`/`REJECTED`); `lifecycle-timeline.js` extended with an optional 3rd `approvalInfo` argument rendering a trailing refund-approval pseudo-step, plus a `timeline-reveal` fade+slide-up keyframe animation; new `app-mode.js` added implementing the Demo/Debug `localStorage` toggle, light/dark theme toggle, a client-side `autoAdvance()` loop over the existing manual `POST .../process` endpoint (600-900ms delay, stops on terminal status or the refund approval gate, simulates an 85/15 COMPLETED/FAILED outcome at `SENT`), `nextManualSteps()` for Debug-mode manual buttons, and a `renderInspector()` helper for the raw request/response panel — all calling existing endpoints only, no backend changes. **`frontend-user/index.html`/`script.js`/`styles.css`** rebuilt from scratch as a single Bootstrap-styled page: header (brand, static "Customer: Kishore", Demo/Debug + theme toggles) → KPI cards (client-side `computeInsights()`) → collapsible "New Payment" form (idempotency key auto-generated via `crypto.randomUUID()`, no manual field) → paginated "Recent Transactions" list with inline expandable detail/refund-request/lifecycle-timeline/debug-inspector panels; old `index.js`/`history.html`/`history.js`/`detail.html`/`detail.js` deleted. **`frontend-business/index.html`/`script.js`/`styles.css`** built the same way (renamed from the originally-planned `ops.html`/`ops.js`/`ops.css`): header → KPI cards (incl. pending-approval count) → filter/search form (existing `status`/`type`/`sourceAccount`/`destinationAccount`/`fromDate`/`toDate` params only — `paymentMethod`/`approvalStatus` filters deferred to `feature/m4-insights-api`) → paginated results table → Bootstrap offcanvas detail panel with full history timeline and refund Approve/Reject actions (gated on `type=REFUND && approvalStatus=PENDING_APPROVAL`); old `dashboard.html`/`dashboard.js`/`audit.html`/`audit.js` deleted. All new/edited files verified with no lint/compile errors. Section 2, 11.2, 14/14.1-14.3, 16, and 19 updated to match. No backend code changed; no git branch/commit created yet (per explicit user instruction to hold off until asked). |
+| 2026-08-05 | Frontend redesign browser smoke-tested end-to-end against a locally running backend (`mvn spring-boot:run`, port 8080) for both `frontend-user/index.html` and `frontend-business/index.html`, in light and dark theme. Found and fixed 6 dark-mode CSS bugs in `frontend-shared/design-tokens.css`, all sharing one root cause: Bootstrap components (`.btn-primary`, `.form-control`/`.form-select`, headings incl. `.h1`-`.h6` utility classes, `.card`, `.text-muted`, `.list-group-item`, `.table` cells) set their own fixed colors independent of the custom `[data-theme="dark"]` variables, so each needed an explicit override matching Bootstrap's own selectors (not just bare tag selectors) to follow the theme — documented in `/memories/repo/bnd-pp.md` as a recurring gotcha for any future Bootstrap component additions. Also found and fixed a functional gap: `frontend-user/script.js`'s refund-request handler never called `AppMode.autoAdvance()` (only the new-payment handler did), so Demo mode silently did nothing after submitting a refund; fixed by adding the same `autoAdvance()` call after a successful `POST /refund`. Verified end-to-end: create payment -> demo auto-advance to COMPLETED -> request refund (demo auto-advance immediately hits the `409 REFUND_NOT_APPROVED` gate and stops, correctly leaving the refund at `CREATED`/`PENDING_APPROVAL`) -> approve via `frontend-business` offcanvas (`POST /refund/approve`) -> confirmed the refund can now progress (`CREATED` -> `VALIDATED`) -> separately verified `POST /refund/reject` end-to-end (status -> `FAILED`, `errorCode: REFUND_REJECTED`, `rejectionReason` populated, timeline renders the `REJECTED` sub-state correctly, Approve/Reject buttons correctly disappear once no longer pending). No backend code changed. No git branch/commit created yet. |
 
 ## 19. Immediate Execution Checklist
 
@@ -1352,14 +1394,20 @@ Implementation checklist for next phase:
 - [x] M4 build (query/list, shared UI, API docs) — implemented and tested on `feature/m4-lifecycle-ui`; merge into `main` still pending (open a PR).
 - [ ] Integration validation across all endpoints (Phase 3, in progress).
 
-v2.2 checklist (added 2026-08-05, spec-approved, implementation not started):
-- [ ] `feature/m3-refund-approval` — schema columns, `PaymentMethod` enum, refund
+v2.2 checklist (added 2026-08-05, spec-approved):
+- [x] `feature/m3-refund-approval` — schema columns, `PaymentMethod` enum, refund
       approval gate, refund idempotency, `SELECT ... FOR UPDATE` concurrency fix
-      (Section 9 M3, Section 8.1 rule 6, Section 10.8/10.9).
+      (Section 9 M3, Section 8.1 rule 6, Section 10.8/10.9). Implemented and tested
+      2026-08-05 (backend only; `detail.html`/`detail.js` cosmetic updates pending).
 - [ ] `feature/shared-dataset-v2` — regenerate `data.sql` with the 5 new columns
       (Section 11.5).
 - [ ] `feature/m4-insights-api` — `GET /api/payments/insights` + extended search filters
       (Section 9 M4, Section 10.10).
-- [ ] `feature/m4-business-ui` — unified `ops.html`/`ops.js`/`ops.css`, brand/theme
-      rework, Debug/Demo toggle (Section 14.1/14.2/14.3).
+- [x] `feature/m4-business-ui` — unified `frontend-business/index.html`/`script.js`/
+      `styles.css`, brand/theme rework, Debug/Demo toggle (Section 14.1/14.2/14.3).
+      **Implemented 2026-08-05** — also extended to fully rebuild `frontend-user/` as a
+      unified `index.html`/`script.js`/`styles.css` (originally a separate/optional
+      scope), and all 6 legacy pages deleted. KPI cards use client-side
+      `computeInsights()` pending `feature/m4-insights-api`. Not yet committed to a git
+      branch (holding off on git operations per explicit user instruction, until asked).
 

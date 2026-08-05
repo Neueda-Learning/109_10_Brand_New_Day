@@ -32,7 +32,7 @@ Full detail in `spec.md` Section 9. Summary:
 |---|---|---|---|---|
 | M1 — Creation & Validation | Poornima | Create payment, get-by-id, input validation | `PaymentController`, `PaymentService(Impl)`, `PaymentRepository`/`JdbcPaymentRepository` (create/get) | `frontend-user/index.html` |
 | M2 — Status Engine & Audit Trail | Neha | `process` transitions, status history | `PaymentController` (process), `PaymentStatusHistoryRepository`/`Jdbc...` | `frontend-business/audit.html` |
-| M3 — Idempotency, Errors, Refund | Tharan | Idempotency short-circuit, refund rules, exception handling | `GlobalExceptionHandler`, 4 exception classes, refund service/repo logic | `frontend-user/detail.html` |
+| M3 — Idempotency, Errors, Refund | Tharan | Idempotency short-circuit, refund rules, exception handling, refund approval workflow + payment method tagging (v2.2, added 2026-08-05) | `GlobalExceptionHandler`, 4 exception classes, refund service/repo logic | `frontend-user/detail.html` |
 | M4 — Query API, Lifecycle UI, Design System, API Docs | Karuna | Search/filter/paginate, shared UI components, OpenAPI config | `PaymentQueryController`, `OpenApiConfig`, `frontend-shared/*` | `frontend-business/dashboard.html`, `frontend-user/history.html` |
 
 Current phase: **Phase 2 (backend/frontend implementation) — DONE for M1-M4 on their
@@ -51,6 +51,8 @@ dashboard.
 | `/api/payments/{id}/history` | GET | M2 | Full status history timeline | TESTED |
 | `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | TESTED |
 | `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | TESTED |
+| `/api/payments/{id}/refund/approve` | POST | M3 | Approve a pending refund (v2.2, added 2026-08-05) | TESTED |
+| `/api/payments/{id}/refund/reject` | POST | M3 | Reject a pending refund (v2.2, added 2026-08-05) | TESTED |
 
 Full request/response JSON shapes and error codes: `spec.md` Section 10. All error
 responses use one shared `ErrorResponse` shape (timestamp, status, errorCode, message, path).
