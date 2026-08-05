@@ -34,6 +34,13 @@ public class PaymentQueryController {
             @RequestParam(required = false) LocalDate toDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        if (page < 0) {
+            throw new IllegalArgumentException("page must be >= 0, got: " + page);
+        }
+        if (size < 1 || size > 100) {
+            throw new IllegalArgumentException("size must be between 1 and 100, got: " + size);
+        }
+
         Map<String, Object> filters = new LinkedHashMap<>();
         if (status != null) {
             filters.put("status", status);
