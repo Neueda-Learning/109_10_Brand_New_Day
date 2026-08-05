@@ -2,8 +2,10 @@ package com.bnd.payment_processing.payment.service;
 
 import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
 import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
+import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
 import com.bnd.payment_processing.common.exception.PaymentNotFoundException;
 import com.bnd.payment_processing.payment.dto.CreatePaymentRequest;
+import com.bnd.payment_processing.payment.dto.ProcessRequest;
 import com.bnd.payment_processing.payment.dto.PaymentResponse;
 import com.bnd.payment_processing.payment.dto.RefundRequest;
 import com.bnd.payment_processing.payment.model.Payment;
@@ -79,6 +81,13 @@ class PaymentServiceImplTest {
         return payment;
     }
 
+    private Payment paymentWithStatus(PaymentStatus status) {
+        Payment payment = completedPayment(new BigDecimal("100.00"));
+        payment.setStatus(status);
+        payment.setErrorCode(null);
+        return payment;
+    }
+
     @Test
     void createPayment_happyPath_insertsPaymentAndInitialHistoryRow() {
         CreatePaymentRequest request = newCreateRequest();
@@ -144,6 +153,157 @@ class PaymentServiceImplTest {
 
         assertThat(response.getId()).isEqualTo(payment.getId());
         assertThat(response.getStatus()).isEqualTo(PaymentStatus.COMPLETED);
+    }
+
+    @Test
+    void processTransition_createdToValidated_updatesStatusAndAppendsHistory() {
+        Payment current = paymentWithStatus(PaymentStatus.CREATED);
+        Payment updated = paymentWithStatus(PaymentStatus.VALIDATED);
+        updated.setId(current.getId());
+
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current), Optional.of(updated));
+        when(paymentRepository.updateStatusIfCurrent(current.getId(), "CREATED", "VALIDATED", null)).thenReturn(1);
+
+        PaymentResponse response = service.processTransition(current.getId(), null);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.VALIDATED);
+        verify(paymentRepository).updateStatusIfCurrent(current.getId(), "CREATED", "VALIDATED", null);
+        verify(paymentStatusHistoryRepository).insert(argThat(history ->
+                history.getFromStatus() == PaymentStatus.CREATED
+                        && history.getToStatus() == PaymentStatus.VALIDATED
+                        && "SYSTEM".equals(history.getTriggeredBy())
+                        && history.getNote() == null));
+    }
+
+    @Test
+    void processTransition_sentToFailed_withErrorCodeAndNote_persistsBoth() {
+        Payment current = paymentWithStatus(PaymentStatus.SENT);
+        Payment updated = paymentWithStatus(PaymentStatus.FAILED);
+        updated.setId(current.getId());
+        updated.setErrorCode("INSUFFICIENT_FUNDS");
+
+        ProcessRequest request = new ProcessRequest();
+        request.setTargetStatus("FAILED");
+        request.setErrorCode(" INSUFFICIENT_FUNDS ");
+        request.setNote("manual test of failure path");
+
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current), Optional.of(updated));
+        when(paymentRepository.updateStatusIfCurrent(current.getId(), "SENT", "FAILED", "INSUFFICIENT_FUNDS")).thenReturn(1);
+
+        PaymentResponse response = service.processTransition(current.getId(), request);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(response.getErrorCode()).isEqualTo("INSUFFICIENT_FUNDS");
+        verify(paymentRepository).updateStatusIfCurrent(current.getId(), "SENT", "FAILED", "INSUFFICIENT_FUNDS");
+        verify(paymentStatusHistoryRepository).insert(argThat(history ->
+                history.getFromStatus() == PaymentStatus.SENT
+                        && history.getToStatus() == PaymentStatus.FAILED
+                        && "manual test of failure path | errorCode=INSUFFICIENT_FUNDS".equals(history.getNote())));
+    }
+
+    @Test
+    void processTransition_sentToFailed_withoutNote_setsHistoryNoteToErrorCodeOnly() {
+        Payment current = paymentWithStatus(PaymentStatus.SENT);
+        Payment updated = paymentWithStatus(PaymentStatus.FAILED);
+        updated.setId(current.getId());
+        updated.setErrorCode("RISK_REJECTED");
+
+        ProcessRequest request = new ProcessRequest();
+        request.setTargetStatus("FAILED");
+        request.setErrorCode("RISK_REJECTED");
+
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current), Optional.of(updated));
+        when(paymentRepository.updateStatusIfCurrent(current.getId(), "SENT", "FAILED", "RISK_REJECTED")).thenReturn(1);
+
+        service.processTransition(current.getId(), request);
+
+        verify(paymentStatusHistoryRepository).insert(argThat(history ->
+                history.getToStatus() == PaymentStatus.FAILED
+                        && "RISK_REJECTED".equals(history.getNote())));
+    }
+
+    @Test
+    void processTransition_terminalStatus_throwsInvalidStatusTransitionException() {
+        Payment current = paymentWithStatus(PaymentStatus.COMPLETED);
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current));
+
+        assertThatThrownBy(() -> service.processTransition(current.getId(), new ProcessRequest()))
+                .isInstanceOf(InvalidStatusTransitionException.class)
+                .hasMessageContaining("terminal status");
+
+        verify(paymentRepository, never()).updateStatusIfCurrent(any(), any(), any(), any());
+        verify(paymentStatusHistoryRepository, never()).insert(any());
+    }
+
+    @Test
+    void processTransition_targetStatusProvidedOutsideSent_throwsInvalidStatusTransitionException() {
+        Payment current = paymentWithStatus(PaymentStatus.CREATED);
+        ProcessRequest request = new ProcessRequest();
+        request.setTargetStatus("FAILED");
+        request.setErrorCode("ANY");
+
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current));
+
+        assertThatThrownBy(() -> service.processTransition(current.getId(), request))
+                .isInstanceOf(InvalidStatusTransitionException.class)
+                .hasMessageContaining("targetStatus can only be specified");
+
+        verify(paymentRepository, never()).updateStatusIfCurrent(any(), any(), any(), any());
+    }
+
+    @Test
+    void processTransition_sentWithInvalidTargetStatus_throwsInvalidStatusTransitionException() {
+        Payment current = paymentWithStatus(PaymentStatus.SENT);
+        ProcessRequest request = new ProcessRequest();
+        request.setTargetStatus("VALIDATED");
+
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current));
+
+        assertThatThrownBy(() -> service.processTransition(current.getId(), request))
+                .isInstanceOf(InvalidStatusTransitionException.class)
+                .hasMessageContaining("targetStatus must be 'COMPLETED' or 'FAILED'");
+
+        verify(paymentRepository, never()).updateStatusIfCurrent(any(), any(), any(), any());
+    }
+
+    @Test
+    void processTransition_sentToFailed_missingErrorCode_throwsIllegalArgumentException() {
+        Payment current = paymentWithStatus(PaymentStatus.SENT);
+        ProcessRequest request = new ProcessRequest();
+        request.setTargetStatus("FAILED");
+
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current));
+
+        assertThatThrownBy(() -> service.processTransition(current.getId(), request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("errorCode is required");
+
+        verify(paymentRepository, never()).updateStatusIfCurrent(any(), any(), any(), any());
+        verify(paymentStatusHistoryRepository, never()).insert(any());
+    }
+
+    @Test
+    void processTransition_conditionalUpdateLosesRace_throwsInvalidStatusTransitionException() {
+        Payment current = paymentWithStatus(PaymentStatus.VALIDATED);
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current));
+        when(paymentRepository.updateStatusIfCurrent(current.getId(), "VALIDATED", "SENT", null)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.processTransition(current.getId(), null))
+                .isInstanceOf(InvalidStatusTransitionException.class)
+                .hasMessageContaining("changed since read");
+
+        verify(paymentStatusHistoryRepository, never()).insert(any());
+    }
+
+    @Test
+    void processTransition_unknownPayment_throwsPaymentNotFoundException() {
+        UUID id = UUID.randomUUID();
+        when(paymentRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.processTransition(id, null))
+                .isInstanceOf(PaymentNotFoundException.class);
+
+        verify(paymentRepository, never()).updateStatusIfCurrent(any(), any(), any(), any());
     }
 
     @Test
