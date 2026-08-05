@@ -32,6 +32,10 @@ public class CreatePaymentRequest {
     @NotBlank
     private String idempotencyKey;
 
+    // Added 2026-08-05 (spec.md Section 10.1, v2.2): optional; defaults server-side
+    // to BANK_TRANSFER if omitted. "BANK_TRANSFER" is the only supported value today.
+    private String paymentMethod;
+
     public CreatePaymentRequest() {
     }
 
@@ -73,5 +77,13 @@ public class CreatePaymentRequest {
 
     public void setIdempotencyKey(String idempotencyKey) {
         this.idempotencyKey = idempotencyKey;
+    }
+
+    public String getPaymentMethod() {
+        return paymentMethod;
+    }
+
+    public void setPaymentMethod(String paymentMethod) {
+        this.paymentMethod = paymentMethod;
     }
 }

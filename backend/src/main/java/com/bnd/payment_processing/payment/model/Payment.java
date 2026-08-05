@@ -21,6 +21,12 @@ public class Payment {
     private String errorCode;
     private PaymentType type;
     private UUID originalPaymentId;
+    // Added 2026-08-05 (spec.md Section 7, v2.2): payment method + refund approval workflow fields.
+    private PaymentMethod paymentMethod;
+    private ApprovalStatus approvalStatus;
+    private String approvedBy;
+    private Instant approvedAt;
+    private String rejectionReason;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -121,5 +127,45 @@ public class Payment {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public PaymentMethod getPaymentMethod() {
+        return paymentMethod;
+    }
+
+    public void setPaymentMethod(PaymentMethod paymentMethod) {
+        this.paymentMethod = paymentMethod;
+    }
+
+    public ApprovalStatus getApprovalStatus() {
+        return approvalStatus;
+    }
+
+    public void setApprovalStatus(ApprovalStatus approvalStatus) {
+        this.approvalStatus = approvalStatus;
+    }
+
+    public String getApprovedBy() {
+        return approvedBy;
+    }
+
+    public void setApprovedBy(String approvedBy) {
+        this.approvedBy = approvedBy;
+    }
+
+    public Instant getApprovedAt() {
+        return approvedAt;
+    }
+
+    public void setApprovedAt(Instant approvedAt) {
+        this.approvedAt = approvedAt;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void setRejectionReason(String rejectionReason) {
+        this.rejectionReason = rejectionReason;
     }
 }

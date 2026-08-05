@@ -1,6 +1,8 @@
 package com.bnd.payment_processing.payment.repository;
 
+import com.bnd.payment_processing.payment.model.ApprovalStatus;
 import com.bnd.payment_processing.payment.model.Payment;
+import com.bnd.payment_processing.payment.model.PaymentMethod;
 import com.bnd.payment_processing.payment.model.PaymentStatus;
 import com.bnd.payment_processing.payment.model.PaymentType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -38,9 +40,11 @@ public class JdbcPaymentRepository implements PaymentRepository {
         String sql = """
             INSERT INTO payments
             (id, idempotency_key, source_account, destination_account, amount, currency,
-             status, error_code, type, original_payment_id, created_at, updated_at)
+             status, error_code, type, original_payment_id, payment_method, approval_status,
+             approved_by, approved_at, rejection_reason, created_at, updated_at)
             VALUES (:id, :idempotencyKey, :sourceAccount, :destinationAccount, :amount, :currency,
-             :status, :errorCode, :type, :originalPaymentId, :createdAt, :updatedAt)
+             :status, :errorCode, :type, :originalPaymentId, :paymentMethod, :approvalStatus,
+             :approvedBy, :approvedAt, :rejectionReason, :createdAt, :updatedAt)
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
@@ -55,6 +59,15 @@ public class JdbcPaymentRepository implements PaymentRepository {
                 .addValue("type", payment.getType().name())
                 .addValue("originalPaymentId",
                         payment.getOriginalPaymentId() == null ? null : payment.getOriginalPaymentId().toString())
+                // paymentMethod defaults to BANK_TRANSFER here as a safety net in case a
+                // caller forgot to set it - spec.md Section 10.1 (v2.2), NOT NULL column.
+                .addValue("paymentMethod",
+                        (payment.getPaymentMethod() == null ? PaymentMethod.BANK_TRANSFER : payment.getPaymentMethod()).name())
+                .addValue("approvalStatus",
+                        payment.getApprovalStatus() == null ? null : payment.getApprovalStatus().name())
+                .addValue("approvedBy", payment.getApprovedBy())
+                .addValue("approvedAt", payment.getApprovedAt() == null ? null : Timestamp.from(payment.getApprovedAt()))
+                .addValue("rejectionReason", payment.getRejectionReason())
                 .addValue("createdAt", Timestamp.from(payment.getCreatedAt()))
                 .addValue("updatedAt", Timestamp.from(payment.getUpdatedAt()));
 
@@ -79,6 +92,17 @@ public class JdbcPaymentRepository implements PaymentRepository {
         List<Payment> results = jdbcTemplate.query(
                 sql,
                 new MapSqlParameterSource("key", idempotencyKey),
+                this::mapRow
+        );
+        return results.stream().findFirst();
+    }
+
+    @Override
+    public Optional<Payment> findByIdForUpdate(UUID id) {
+        String sql = "SELECT * FROM payments WHERE id = :id FOR UPDATE";
+        List<Payment> results = jdbcTemplate.query(
+                sql,
+                new MapSqlParameterSource("id", id.toString()),
                 this::mapRow
         );
         return results.stream().findFirst();
@@ -172,6 +196,37 @@ public class JdbcPaymentRepository implements PaymentRepository {
         return sum == null ? BigDecimal.ZERO : sum;
     }
 
+    @Override
+    public int approveRefund(UUID id, String approvedBy, Instant approvedAt) {
+        String sql = """
+            UPDATE payments
+            SET approval_status = 'APPROVED', approved_by = :approvedBy, approved_at = :approvedAt,
+                updated_at = :updatedAt
+            WHERE id = :id AND type = 'REFUND' AND approval_status = 'PENDING_APPROVAL'
+            """;
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("id", id.toString())
+                .addValue("approvedBy", approvedBy)
+                .addValue("approvedAt", Timestamp.from(approvedAt))
+                .addValue("updatedAt", Timestamp.from(approvedAt));
+        return jdbcTemplate.update(sql, params);
+    }
+
+    @Override
+    public int rejectRefund(UUID id, String rejectionReason) {
+        String sql = """
+            UPDATE payments
+            SET approval_status = 'REJECTED', rejection_reason = :rejectionReason,
+                status = 'FAILED', error_code = 'REFUND_REJECTED', updated_at = :updatedAt
+            WHERE id = :id AND type = 'REFUND' AND approval_status = 'PENDING_APPROVAL'
+            """;
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("id", id.toString())
+                .addValue("rejectionReason", rejectionReason)
+                .addValue("updatedAt", Timestamp.from(Instant.now()));
+        return jdbcTemplate.update(sql, params);
+    }
+
     private Payment mapRow(ResultSet rs, int rowNum) throws SQLException {
         Payment p = new Payment();
         p.setId(UUID.fromString(rs.getString("id")));
@@ -185,6 +240,14 @@ public class JdbcPaymentRepository implements PaymentRepository {
         p.setType(PaymentType.valueOf(rs.getString("type")));
         String originalPaymentId = rs.getString("original_payment_id");
         p.setOriginalPaymentId(originalPaymentId == null ? null : UUID.fromString(originalPaymentId));
+        String paymentMethod = rs.getString("payment_method");
+        p.setPaymentMethod(paymentMethod == null ? null : PaymentMethod.valueOf(paymentMethod));
+        String approvalStatus = rs.getString("approval_status");
+        p.setApprovalStatus(approvalStatus == null ? null : ApprovalStatus.valueOf(approvalStatus));
+        p.setApprovedBy(rs.getString("approved_by"));
+        Timestamp approvedAt = rs.getTimestamp("approved_at");
+        p.setApprovedAt(approvedAt == null ? null : approvedAt.toInstant());
+        p.setRejectionReason(rs.getString("rejection_reason"));
         p.setCreatedAt(rs.getTimestamp("created_at").toInstant());
         p.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
         return p;
