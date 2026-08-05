@@ -4,160 +4,199 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Operations Dashboard - Payment Processing</title>
-  <link rel="stylesheet" href="../frontend-shared/design-tokens.css">
-  <link rel="stylesheet" href="ops.css">
   <!-- Bootstrap 5 + Bootstrap Icons via CDN only (spec.md Section 4 exception, Section 14.1) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="../frontend-shared/design-tokens.css">
+  <link rel="stylesheet" href="ops.css">
 </head>
 <body>
-  <div class="container">
-    <header class="ops-header">
-      <h1>Operations Dashboard</h1>
-      <div class="ops-header-toggles">
-        <label class="toggle-switch">
-          <i class="bi bi-moon"></i>
-          <input type="checkbox" id="theme-toggle">
-          <span class="toggle-switch-track"></span>
-          Dark mode
-        </label>
-        <label class="toggle-switch">
-          <i class="bi bi-bug"></i>
-          <input type="checkbox" id="mode-toggle">
-          <span class="toggle-switch-track"></span>
-          Debug mode
-        </label>
-      </div>
-    </header>
-
-    <!-- KPI cards (Section 14.1) - fed by GET /api/payments/insights. Gracefully shows
-         "Unavailable" placeholders until that endpoint is implemented (feature/m4-insights-api). -->
-    <div class="card kpi-grid" id="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-label"><i class="bi bi-stack"></i> Total Payments</div>
-        <div class="kpi-value" id="kpi-total-count">—</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label"><i class="bi bi-cash-stack"></i> Total Amount</div>
-        <div class="kpi-value" id="kpi-total-amount">—</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label"><i class="bi bi-check-circle"></i> Success Rate</div>
-        <div class="kpi-value" id="kpi-success-rate">—</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label"><i class="bi bi-arrow-counterclockwise"></i> Refund Rate</div>
-        <div class="kpi-value" id="kpi-refund-rate">—</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label"><i class="bi bi-hourglass-split"></i> Pending Approvals</div>
-        <div class="kpi-value" id="kpi-pending-approval">—</div>
+  <header class="app-header">
+    <div class="container-fluid px-3 py-2 d-flex align-items-center justify-content-between">
+      <span class="brand"><i class="bi bi-graph-up-arrow"></i> Operations Dashboard</span>
+      <div class="d-flex align-items-center gap-3">
+        <div class="mode-toggle-group">
+          <span>Demo</span>
+          <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="mode-toggle">
+          </div>
+          <span>Debug</span>
+        </div>
+        <div class="form-check form-switch m-0">
+          <input class="form-check-input" type="checkbox" role="switch" id="theme-toggle">
+          <label class="form-check-label" for="theme-toggle"><i class="bi bi-moon-stars"></i></label>
+        </div>
       </div>
     </div>
+  </header>
+
+  <main class="container py-4">
+    <!-- KPI cards (Section 14.1) - fed by GET /api/payments/insights. -->
+    <section class="row row-cols-2 row-cols-md-5 g-3 mb-4" id="kpi-grid">
+      <div class="col">
+        <div class="card insight-card">
+          <div class="insight-label"><i class="bi bi-stack"></i> Total Payments</div>
+          <div class="insight-value" id="kpi-total-count">—</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card insight-card">
+          <div class="insight-label"><i class="bi bi-cash-stack"></i> Total Amount</div>
+          <div class="insight-value" id="kpi-total-amount">—</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card insight-card">
+          <div class="insight-label"><i class="bi bi-check-circle"></i> Success Rate</div>
+          <div class="insight-value" id="kpi-success-rate">—</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card insight-card">
+          <div class="insight-label"><i class="bi bi-arrow-counterclockwise"></i> Refund Rate</div>
+          <div class="insight-value" id="kpi-refund-rate">—</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card insight-card">
+          <div class="insight-label"><i class="bi bi-hourglass-split"></i> Pending Approvals</div>
+          <div class="insight-value" id="kpi-pending-approval">—</div>
+        </div>
+      </div>
+    </section>
     <p id="kpi-error-message" class="error-message" hidden></p>
 
-    <div class="card">
-      <form id="filter-form">
-        <label for="status">Status</label>
-        <select id="status" name="status">
-          <option value="">Any</option>
-          <option value="CREATED">CREATED</option>
-          <option value="VALIDATED">VALIDATED</option>
-          <option value="SENT">SENT</option>
-          <option value="COMPLETED">COMPLETED</option>
-          <option value="FAILED">FAILED</option>
-        </select>
+    <!-- Filters -->
+    <section class="card mb-4">
+      <div class="d-flex align-items-center justify-content-between" data-bs-toggle="collapse" href="#filter-body" role="button" aria-expanded="true" aria-controls="filter-body">
+        <h2 class="h5 mb-0"><i class="bi bi-funnel-fill"></i> Filters</h2>
+        <i class="bi bi-chevron-down"></i>
+      </div>
+      <div class="collapse show mt-3" id="filter-body">
+        <form id="filter-form">
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label for="status" class="form-label">Status</label>
+              <select id="status" name="status" class="form-select">
+                <option value="">Any</option>
+                <option value="CREATED">CREATED</option>
+                <option value="VALIDATED">VALIDATED</option>
+                <option value="SENT">SENT</option>
+                <option value="COMPLETED">COMPLETED</option>
+                <option value="FAILED">FAILED</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label for="type" class="form-label">Type</label>
+              <select id="type" name="type" class="form-select">
+                <option value="">Any</option>
+                <option value="PAYMENT">PAYMENT</option>
+                <option value="REFUND">REFUND</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label for="paymentMethod" class="form-label">Payment Method</label>
+              <select id="paymentMethod" name="paymentMethod" class="form-select">
+                <option value="">Any</option>
+                <option value="BANK_TRANSFER">BANK_TRANSFER</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label for="approvalStatus" class="form-label">Approval Status</label>
+              <select id="approvalStatus" name="approvalStatus" class="form-select">
+                <option value="">Any</option>
+                <option value="PENDING_APPROVAL">PENDING_APPROVAL</option>
+                <option value="APPROVED">APPROVED</option>
+                <option value="REJECTED">REJECTED</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label for="sourceAccount" class="form-label">Source Account</label>
+              <input type="text" class="form-control" id="sourceAccount" name="sourceAccount">
+            </div>
+            <div class="col-md-3">
+              <label for="destinationAccount" class="form-label">Destination Account</label>
+              <input type="text" class="form-control" id="destinationAccount" name="destinationAccount">
+            </div>
+            <div class="col-md-3">
+              <label for="fromDate" class="form-label">From Date</label>
+              <input type="date" class="form-control" id="fromDate" name="fromDate">
+            </div>
+            <div class="col-md-3">
+              <label for="toDate" class="form-label">To Date</label>
+              <input type="date" class="form-control" id="toDate" name="toDate">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-search"></i> Search</button>
+        </form>
+        <p id="error-message" class="error-message mt-3" hidden></p>
+      </div>
+    </section>
 
-        <label for="type">Type</label>
-        <select id="type" name="type">
-          <option value="">Any</option>
-          <option value="PAYMENT">PAYMENT</option>
-          <option value="REFUND">REFUND</option>
-        </select>
+    <!-- Results table -->
+    <section class="card mb-4">
+      <div class="table-responsive">
+        <table id="results-table" class="table table-hover align-middle mb-3">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Source</th>
+              <th>Destination</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Type</th>
+              <th>Method</th>
+              <th>Approval</th>
+              <th>Created</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+      <div class="d-flex align-items-center justify-content-between">
+        <p id="pagination-info" class="mb-0 text-muted small"></p>
+        <div class="d-flex gap-2">
+          <button id="prev-page-btn" type="button" class="btn btn-outline-secondary btn-sm">Previous</button>
+          <button id="next-page-btn" type="button" class="btn btn-outline-secondary btn-sm">Next</button>
+        </div>
+      </div>
+    </section>
 
-        <!-- paymentMethod/approvalStatus filters (added 2026-08-05, Section 9 M4).
-             Wired now; backend filtering support lands with feature/m3-refund-approval /
-             feature/m4-insights-api - until then the API silently ignores these params. -->
-        <label for="paymentMethod">Payment Method</label>
-        <select id="paymentMethod" name="paymentMethod">
-          <option value="">Any</option>
-          <option value="BANK_TRANSFER">BANK_TRANSFER</option>
-        </select>
+    <!-- Detail panel -->
+    <section class="card mb-4" id="detail-card" hidden>
+      <h2 class="h5"><i class="bi bi-receipt"></i> Payment Detail</h2>
+      <div class="detail-fields small text-muted mb-2">
+        <p class="mb-1">ID: <span id="detail-id"></span></p>
+        <p class="mb-1">Source Account: <span id="detail-source"></span></p>
+        <p class="mb-1">Destination Account: <span id="detail-destination"></span></p>
+        <p class="mb-1">Amount: <span id="detail-amount"></span> <span id="detail-currency"></span></p>
+        <p class="mb-1">Status: <span id="detail-status" class="status-badge"></span></p>
+        <p class="mb-1">Type: <span id="detail-type"></span></p>
+      </div>
 
-        <label for="approvalStatus">Approval Status</label>
-        <select id="approvalStatus" name="approvalStatus">
-          <option value="">Any</option>
-          <option value="PENDING_APPROVAL">PENDING_APPROVAL</option>
-          <option value="APPROVED">APPROVED</option>
-          <option value="REJECTED">REJECTED</option>
-        </select>
-
-        <label for="sourceAccount">Source Account</label>
-        <input type="text" id="sourceAccount" name="sourceAccount">
-
-        <label for="destinationAccount">Destination Account</label>
-        <input type="text" id="destinationAccount" name="destinationAccount">
-
-        <label for="fromDate">From Date</label>
-        <input type="date" id="fromDate" name="fromDate">
-
-        <label for="toDate">To Date</label>
-        <input type="date" id="toDate" name="toDate">
-
-        <button type="submit"><i class="bi bi-search"></i> Search</button>
-      </form>
-      <p id="error-message" class="error-message" hidden></p>
-    </div>
-
-    <div class="card">
-      <table id="results-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Source</th>
-            <th>Destination</th>
-            <th>Amount</th>
-            <th>Status</th>
-            <th>Type</th>
-            <th>Method</th>
-            <th>Approval</th>
-            <th>Created</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="results-body"></tbody>
-      </table>
-      <p id="pagination-info"></p>
-      <button id="prev-page-btn" type="button">Previous</button>
-      <button id="next-page-btn" type="button">Next</button>
-    </div>
-
-    <div class="card" id="detail-card" hidden>
-      <h2>Payment Detail</h2>
-      <p>ID: <span id="detail-id"></span></p>
-      <p>Source Account: <span id="detail-source"></span></p>
-      <p>Destination Account: <span id="detail-destination"></span></p>
-      <p>Amount: <span id="detail-amount"></span> <span id="detail-currency"></span></p>
-      <p>Status: <span id="detail-status" class="status-badge"></span></p>
-      <p>Type: <span id="detail-type"></span></p>
-
-      <div id="detail-approval-actions" hidden>
-        <label for="approve-by">Approved/Rejected by</label>
-        <input type="text" id="approve-by" placeholder="ops-user-1">
-        <button id="approve-btn" type="button"><i class="bi bi-check-lg"></i> Approve</button>
-        <button id="reject-btn" class="danger" type="button"><i class="bi bi-x-lg"></i> Reject</button>
+      <div id="detail-approval-actions" class="row g-2 align-items-end mb-2" hidden>
+        <div class="col-auto">
+          <label for="approve-by" class="form-label small mb-0">Approved/Rejected by</label>
+          <input type="text" class="form-control form-control-sm" id="approve-by" placeholder="ops-user-1">
+        </div>
+        <div class="col-auto">
+          <button id="approve-btn" type="button" class="btn btn-outline-success btn-sm"><i class="bi bi-check-lg"></i> Approve</button>
+          <button id="reject-btn" type="button" class="btn btn-outline-danger btn-sm"><i class="bi bi-x-lg"></i> Reject</button>
+        </div>
       </div>
       <p id="approval-error" class="error-message" hidden></p>
 
-      <button id="demo-advance-btn" type="button" hidden><i class="bi bi-play-fill"></i> Auto-advance (demo)</button>
+      <button id="demo-advance-btn" type="button" class="btn btn-outline-primary btn-sm mb-3" hidden><i class="bi bi-play-fill"></i> Auto-advance (demo)</button>
 
-      <h3>Timeline</h3>
+      <h3 class="h6"><i class="bi bi-clock-history"></i> Timeline</h3>
       <div id="timeline"></div>
 
       <div id="debug-log-panel" class="debug-log-panel" hidden></div>
-    </div>
-  </div>
+    </section>
+  </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="../frontend-shared/app-mode.js"></script>
   <script src="../frontend-shared/lifecycle-timeline.js"></script>
   <script src="ops.js"></script>
