@@ -1,18 +1,18 @@
 /*
- * Shared design tokens (spec.md Section 9 - M4).
+ * Shared design tokens (spec.md Section 9 - M4, theming/dark-mode per Section 14.2).
  * Every page in frontend-user/ and frontend-business/ must include this file
  * for consistent colors, spacing, typography, and status-badge styling.
  */
 
 :root {
-  /* Colors */
+  /* Colors - HSBC-inspired palette, light mode (default) */
   --color-bg: #f5f7fa;
   --color-surface: #ffffff;
-  --color-text: #1a1f26;
+  --color-text: #1a1a1a;
   --color-text-muted: #5a6472;
   --color-border: #d8dee6;
-  --color-primary: #2f6fed;
-  --color-primary-hover: #2559c2;
+  --color-primary: #db0011;
+  --color-primary-hover: #b3000e;
   --color-danger: #d64545;
   --color-danger-hover: #b83636;
 
@@ -27,6 +27,14 @@
   --status-completed-fg: #1a7f43;
   --status-failed-bg: #fdeaea;
   --status-failed-fg: #c0392b;
+
+  /* Refund approval sub-state badge colors (added 2026-08-05, Section 14.2) */
+  --status-pending_approval-bg: #fff4e0;
+  --status-pending_approval-fg: #b9770e;
+  --status-approved-bg: #dff5e6;
+  --status-approved-fg: #17803d;
+  --status-rejected-bg: #fbe4e4;
+  --status-rejected-fg: #a41c1c;
 
   /* Spacing scale */
   --space-1: 4px;
@@ -45,6 +53,22 @@
 
   --radius: 6px;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  /* Motion (Section 14.3) - subtle only, no bounce/elastic easing */
+  --transition-fast: 150ms ease-in-out;
+  --transition-base: 200ms ease-in-out;
+}
+
+/* Dark mode override - toggled via [data-theme="dark"] on <html>, user-selected only
+   (never auto-detected from OS preference), persisted in localStorage (Section 14.2). */
+[data-theme="dark"] {
+  --color-bg: #121212;
+  --color-surface: #1e1e1e;
+  --color-text: #f2f2f2;
+  --color-text-muted: #8c93a6;
+  --color-border: #33363b;
+  --color-primary: #ff3b3b;
+  --color-primary-hover: #e02c2c;
 }
 
 * {
@@ -57,6 +81,7 @@ body {
   font-size: var(--font-size-base);
   color: var(--color-text);
   background: var(--color-bg);
+  transition: background var(--transition-base), color var(--transition-base);
 }
 
 a {
@@ -80,6 +105,7 @@ h1, h2, h3 {
   box-shadow: var(--shadow-card);
   padding: var(--space-4);
   margin-bottom: var(--space-4);
+  transition: background var(--transition-base), border-color var(--transition-base);
 }
 
 label {
@@ -140,6 +166,11 @@ button:disabled {
 .status-badge.COMPLETED { background: var(--status-completed-bg); color: var(--status-completed-fg); }
 .status-badge.FAILED { background: var(--status-failed-bg); color: var(--status-failed-fg); }
 
+/* Refund approval sub-state badges (added 2026-08-05, Section 14.2) */
+.status-badge.PENDING_APPROVAL { background: var(--status-pending_approval-bg); color: var(--status-pending_approval-fg); }
+.status-badge.APPROVED { background: var(--status-approved-bg); color: var(--status-approved-fg); }
+.status-badge.REJECTED { background: var(--status-rejected-bg); color: var(--status-rejected-fg); }
+
 .error-message {
   color: var(--color-danger);
   font-size: var(--font-size-sm);
@@ -167,6 +198,12 @@ th, td {
 .timeline-item {
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--color-border);
+  animation: timeline-item-reveal var(--transition-base) ease-in-out;
+}
+
+@keyframes timeline-item-reveal {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .timeline-item:last-child {
@@ -194,3 +231,63 @@ th, td {
   color: var(--color-text-muted);
   font-style: italic;
 }
+
+.timeline-approval-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+
+/* Reusable toggle switch (Section 14.2/14.3) - used by the theme toggle and the
+   Demo/Debug mode toggle. Markup: <label class="toggle-switch"><input type="checkbox">
+   <span class="toggle-switch-track"></span></label> */
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-switch-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--color-border);
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.toggle-switch-track::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  transition: transform var(--transition-fast);
+}
+
+.toggle-switch input:checked + .toggle-switch-track {
+  background: var(--color-primary);
+}
+
+.toggle-switch input:checked + .toggle-switch-track::before {
+  transform: translateX(16px);
+}
+

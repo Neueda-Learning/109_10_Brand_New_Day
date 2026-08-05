@@ -1,0 +1,73 @@
+/*
+ * Page-specific styles for ops.html (M4 - unified business dashboard, Section 14.1).
+ * Shared tokens/components (colors, spacing, badges, toggle-switch) live in
+ * frontend-shared/design-tokens.css - this file only adds ops.html's own layout.
+ */
+
+.ops-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.ops-header-toggles {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+
+.kpi-card {
+  padding: var(--space-2);
+  text-align: center;
+}
+
+.kpi-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.kpi-value {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+}
+
+#results-table th:last-child,
+#results-table td:last-child {
+  text-align: right;
+}
+
+.debug-log-panel {
+  margin-top: var(--space-3);
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  background: var(--color-bg);
+}
+
+.debug-log-entry {
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-1);
+}
+
+.debug-log-entry pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+}
