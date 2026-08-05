@@ -9,56 +9,72 @@ integration mechanics. Update alongside `spec.md` when things change.
 
 ## 1. Planned Features List
 
-- Create a payment (`CREATED` status, idempotent on `idempotencyKey`).
-- Fetch a payment by id.
-- List/search/filter payments (by status, type, source/destination account, date range) with pagination.
-- Full status-change audit trail (history timeline) per payment.
-- Advance a payment through its lifecycle one step at a time (`process` endpoint):
-  `CREATED → VALIDATED → SENT → COMPLETED|FAILED`.
-- Refunds: create a `REFUND`-type payment against a `COMPLETED` original, capped at the
-  original amount cumulative across multiple partial refunds, no refund-of-refund.
-- Two frontends: end-customer app (`frontend-user`) and internal ops app (`frontend-business`).
+Updated 2026-08-05 for the product.md v3.0 "BND AI Billing and Payment Processing
+Engine" redesign — see `spec.md` for full detail. Phase 1 (schema + seed data) is in
+progress; everything below is the **target** feature set for Phases 2-6, not all of it
+is implemented yet (see Section 2/3 status).
+
+- Customer (Kishore) buys AI credit packs (Starter/Pro/Scale) via an invoice-based
+  checkout, paying by Card or Bank Transfer in INR, USD, or EUR.
+- Invoices carry subtotal/GST(18%)/total; GST breakdown shown in the UI.
+- Multi-currency payments convert to a USD settlement amount via seeded exchange rates
+  (Neha's scope — see `spec.md` Section 6.1).
+- Payment methods are tokenized/masked only — never raw card or bank account numbers.
+- Core payment lifecycle unchanged: `CREATED → VALIDATED → SENT → COMPLETED|FAILED`,
+  plus a settlement lifecycle (`NOT_READY → PENDING → SETTLED`).
+- Refunds are now a first-class `refunds` table (not a `type=REFUND` payment row):
+  request → business approve/reject → process to completion, capped cumulatively at the
+  original payment amount, multiple partial refunds allowed.
+- Two frontends: customer checkout (`frontend-user`) and business ops dashboard
+  (`frontend-business`), both getting a visual redesign in Phases 3-4.
+- Lifecycle Playback Mode: Demo mode auto-plays scenarios, Debug mode exposes raw
+  request/response + manual transition buttons (Phase 5).
 - OpenAPI/Swagger docs auto-generated from the backend.
-- Local MySQL via Docker Compose, seeded with a realistic 491-payment / 1661-history-row dataset.
+- Local MySQL via Docker Compose, seeded with a deterministic dataset covering Kishore's
+  demo scenarios plus bulk data for 14 other customers (`spec.md` Section 11).
 
-Out of scope for now (see `spec.md` Section 5): multi-currency (`INR` only), auth/login,
-notifications, batch processing.
+Out of scope for now (see `spec.md` Section 3 / product.md Section 5): auth/login, real
+payment gateway or live FX calls, UPI/wallets/autopay, notifications, batch processing.
 
-## 2. Feature → Dev Mapping
+## 2. Feature → Ownership Mapping
 
-Full detail in `spec.md` Section 9. Summary (updated 2026-08-05 — both frontends are now
-single unified pages, not the original per-module page split):
+Full detail in `spec.md` Section 6. The old per-module (M1-M4) ownership split from the
+pre-redesign MVP phase is retired — ownership is now a simple two-way split:
 
-| Module | Owner | Feature scope | Backend files | Frontend page(s) |
-|---|---|---|---|---|
-| M1 — Creation & Validation | Poornima | Create payment, get-by-id, input validation | `PaymentController`, `PaymentService(Impl)`, `PaymentRepository`/`JdbcPaymentRepository` (create/get) | `frontend-user/index.html` |
-| M2 — Status Engine & Audit Trail | Neha | `process` transitions, status history | `PaymentController` (process), `PaymentStatusHistoryRepository`/`Jdbc...` | `frontend-business/ops.html` |
-| M3 — Idempotency, Errors, Refund | Tharan | Idempotency short-circuit, refund rules, refund approval workflow, exception handling | `GlobalExceptionHandler`, exception classes, refund service/repo logic | `frontend-user/index.html`, `frontend-business/ops.html` (approve/reject) |
-| M4 — Query API, Lifecycle UI, Design System, API Docs, Insights | Karuna | Search/filter/paginate, aggregate insights, shared UI components, OpenAPI config | `PaymentQueryController`, `PaymentAnalyticsService(Impl)`, `OpenApiConfig`, `frontend-shared/*` | `frontend-business/ops.html`, `frontend-user/index.html` |
+| Owner | Scope |
+|---|---|
+| Neha | Multi-currency implementation only: `exchange_rates` read access, FX lookup/conversion service, currency selection handling, USD conversion calculation, FX-related response fields, conversion tests. |
+| Tharan | Everything else: spec/schema/data generator, invoice feature, payment method masking/token model, customer checkout UI, business dashboard UI, demo/debug mode, refund workflow, security notes, all remaining API integration. |
 
-Current phase: **Phase 2 (backend/frontend implementation) is DONE for M1-M4, merged to
-`main`**, including the refund approval workflow and the `/insights` aggregate endpoint.
-Both frontends were unified into single-page apps (`frontend-user/index.html`,
-`frontend-business/ops.html`) on 2026-08-05, replacing the original
-index/history/detail and dashboard/audit page split. See `spec.md` Section 2 for the
-live status dashboard — the project is about to start the product.md-driven Phase 3
-redesign (7-table schema, invoices, multi-currency, customers).
+Current phase: **Phase 1 (schema, seed data, spec rewrite) is IN_PROGRESS** on
+`feature/p1-schema-seed`. `schema.sql` and `data.sql` are rewritten for the new 7-table
+model; backend domain code (`Payment`/`PaymentServiceImpl`/etc.) is intentionally out of
+sync and will not compile until Phase 2 rewrites it. See `spec.md` Section 2 for the
+live status dashboard.
 
 ## 3. REST Endpoints
 
+Target contract for the redesign (`spec.md` Section 7) — **all NOT_IMPLEMENTED as of
+Phase 1**; the previously-working M1-M4 endpoints below are now stale/superseded because
+the schema they were built against has been replaced (Phase 1), and Phase 2 has not yet
+rewritten the backend to match:
+
 | Endpoint | Method | Owner | Purpose | Status |
 |---|---|---|---|---|
-| `/api/payments` | POST | M1 (+M3 idempotency) | Create payment | TESTED |
-| `/api/payments/{id}` | GET | M1 | Fetch payment by id | TESTED |
-| `/api/payments` | GET | M4 | List/filter/search payments (paginated) | TESTED |
-| `/api/payments/insights` | GET | M4 | Aggregate KPI/analytics for dashboards | TESTED |
-| `/api/payments/{id}/history` | GET | M2 | Full status history timeline | TESTED |
-| `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | TESTED |
-| `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | TESTED |
-| `/api/payments/{id}/refund/approve` | POST | M3 | Approve a pending refund | TESTED |
-| `/api/payments/{id}/refund/reject` | POST | M3 | Reject a pending refund | TESTED |
+| `/api/bootstrap` | GET | Tharan | Checkout bootstrap data | NOT_IMPLEMENTED |
+| `/api/invoices` | POST | Tharan | Create an invoice for a credit pack | NOT_IMPLEMENTED |
+| `/api/payments` | POST | Tharan (+Neha FX fields) | Create a payment against an invoice | NOT_IMPLEMENTED |
+| `/api/payments/{id}` | GET | Tharan | Fetch payment by id | NOT_IMPLEMENTED |
+| `/api/payments` | GET | Tharan | List/filter/search payments (paginated) | NOT_IMPLEMENTED |
+| `/api/payments/{id}/history` | GET | Tharan | Full status history timeline | NOT_IMPLEMENTED |
+| `/api/payments/{id}/process` | POST | Tharan | Advance payment to next valid state | NOT_IMPLEMENTED |
+| `/api/payments/{id}/refund` | POST | Tharan | Request a refund | NOT_IMPLEMENTED |
+| `/api/refunds/{id}/approve` | POST | Tharan | Approve a pending refund | NOT_IMPLEMENTED |
+| `/api/refunds/{id}/reject` | POST | Tharan | Reject a pending refund | NOT_IMPLEMENTED |
+| `/api/business/dashboard` | GET | Tharan | Business KPI aggregates | NOT_IMPLEMENTED |
+| `/api/demo/scenarios` | GET | Tharan | List seeded demo scenarios (Phase 5) | NOT_IMPLEMENTED |
 
-Full request/response JSON shapes and error codes: `spec.md` Section 10. All error
+Full request/response JSON shapes and error codes: `spec.md` Section 7. All error
 responses use one shared `ErrorResponse` shape (timestamp, status, errorCode, message, path).
 
 Live interactive docs once the app is running: `http://localhost:8080/swagger-ui.html`
@@ -101,45 +117,32 @@ files above are the working wireframes.
 
 ## 5. DB Schema
 
-Canonical source: `backend/src/main/resources/schema.sql` (mirrors `spec.md` Section 7).
-Applied automatically on every backend startup via `spring.sql.init.mode=always`.
+Rewritten 2026-08-05 (Phase 1) to the 7-table BND AI Billing model. Canonical source:
+`backend/src/main/resources/schema.sql` (mirrors `spec.md` Section 4). Applied
+automatically on every backend startup via `spring.sql.init.mode=always`.
 
-**`payments`**
-
-| Column | Type | Notes |
+| Table | Purpose | Key columns |
 |---|---|---|
-| id | CHAR(36) PK | server-generated UUID |
-| idempotency_key | VARCHAR(255) UNIQUE | dedupe key for create |
-| source_account | VARCHAR(64) | |
-| destination_account | VARCHAR(64) | |
-| amount | DECIMAL(18,2) | |
-| currency | VARCHAR(3) | `INR` only for now |
-| status | VARCHAR(20) | `CREATED`/`VALIDATED`/`SENT`/`COMPLETED`/`FAILED` |
-| error_code | VARCHAR(64) NULL | set only when `FAILED` |
-| type | VARCHAR(10) | `PAYMENT` / `REFUND` |
-| original_payment_id | CHAR(36) NULL FK→payments.id | set only for `REFUND` rows |
-| created_at / updated_at | TIMESTAMP | UTC |
+| `customers` | Customer identity | `customer_ref` (unique, e.g. `CUS-KISHORE-001`), `display_name`, `email`, `default_currency` |
+| `exchange_rates` | Seeded FX rates | `from_currency`/`to_currency`, `rate` DECIMAL(18,8), `effective_at`, `source` |
+| `invoices` | What the customer owes pre-payment | `invoice_number` (unique), `customer_id` FK, `product_name`/`product_code`, `credit_units`, `subtotal_amount`/`gst_amount`/`total_amount`, `currency`, `status` |
+| `payment_methods` | Tokenized/masked method refs | `customer_id` FK, `method_type` (`CARD`/`BANK_TRANSFER`), `masked_identifier`, `token_ref`, `provider` |
+| `payments` | Core payment engine record | `invoice_id`/`customer_id`/`payment_method_id` FKs, `idempotency_key` (unique), `amount`/`currency`, `exchange_rate_id` FK (nullable), `fx_rate`, `usd_amount`, `status`, `settlement_status`, `error_code` |
+| `payment_status_history` | Append-only audit trail | `payment_id` FK, `from_status`/`to_status`, `changed_at`, `triggered_by`, `note`, `seq` (ordering tiebreaker) |
+| `refunds` | First-class refund workflow | `payment_id` FK, `amount`/`currency`/`usd_amount`, `reason`, `approval_status`, `status`, `approved_by`/`approved_at`, `rejection_reason` |
 
-Indexes: `status`, `type`, `source_account`, `destination_account`, `created_at`,
-`original_payment_id`.
+Full column-by-column detail: `spec.md` Section 4. Key structural changes vs. the
+previous 2-table model: `payments.source_account`/`destination_account`/`type`/
+`original_payment_id`/`payment_method` (enum)/`approval_status`/`approved_by`/
+`approved_at`/`rejection_reason` are all dropped — refunds are now their own table with
+their own approval workflow, and payments gain invoice/customer/payment-method/FX
+linkage plus a dedicated `settlement_status`.
 
-**`payment_status_history`**
-
-| Column | Type | Notes |
-|---|---|---|
-| id | CHAR(36) PK | |
-| payment_id | CHAR(36) FK→payments.id | |
-| from_status | VARCHAR(20) NULL | null for the initial `CREATED` row |
-| to_status | VARCHAR(20) | |
-| changed_at | TIMESTAMP | UTC |
-| triggered_by | VARCHAR(32) | e.g. `SYSTEM` |
-| note | VARCHAR(255) NULL | |
-
-Index: `(payment_id, changed_at)`.
-
-Seed data: `backend/src/main/resources/data.sql` — 491 `payments` rows / 1661
-`payment_status_history` rows, generated deterministically by
-`scripts/generate_data_sql.py` (one-time generator, not part of the build).
+Seed data: `backend/src/main/resources/data.sql` — 15 customers, 3 exchange rates, 175
+invoices, 30 payment methods, 169 payments, 645 status-history rows, 23 refunds,
+generated deterministically by `scripts/generate_data_sql.py` (one-time generator, not
+part of the build). Verified to load cleanly against a throwaway MySQL database with
+matching row counts (Phase 1).
 
 ## 6. Git Repo + Owner + Collaborators
 
@@ -214,9 +217,12 @@ Per `spec.md` Section 15:
   `spring-boot-webmvc-test` (test scope, added by M3 — see `spec.md` Section 6.2).
 - Environment prerequisite: MySQL running locally — standard command is
   `docker compose up -d` (see Section 13 below) before running integration/repository tests.
-- 29 tests currently passing across `GlobalExceptionHandlerTest`,
-  `JdbcPaymentRepositoryTest`, and `PaymentServiceImplTest` (verified via `mvn test` on
-  `feature/m4-lifecycle-ui` after merging latest `main`).
+- Baseline before the Phase 1 schema rewrite: 78/78 tests passing (`mvn test`,
+  `BUILD SUCCESS`, verified on `fix/pre-phase3-cleanup`/`main`, commit `991c4fc`).
+- As of Phase 1 (`feature/p1-schema-seed`), the backend does **not** compile — this is
+  expected: `schema.sql` was rewritten to the 7-table model but `Payment`/
+  `PaymentServiceImpl`/`JdbcPaymentRepository`/etc. still reference the old dropped
+  columns. Compilation and the full test suite are restored at the start of Phase 2.
 
 ## 12. GitHub Actions File for CI
 
