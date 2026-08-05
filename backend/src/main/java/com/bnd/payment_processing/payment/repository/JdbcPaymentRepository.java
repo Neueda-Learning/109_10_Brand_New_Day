@@ -162,6 +162,14 @@ public class JdbcPaymentRepository implements PaymentRepository {
             conditions.add("type = :type");
             params.addValue("type", filters.get("type").toString());
         }
+        if (filters.get("paymentMethod") != null) {
+            conditions.add("payment_method = :paymentMethod");
+            params.addValue("paymentMethod", filters.get("paymentMethod").toString());
+        }
+        if (filters.get("approvalStatus") != null) {
+            conditions.add("approval_status = :approvalStatus");
+            params.addValue("approvalStatus", filters.get("approvalStatus").toString());
+        }
         if (filters.get("sourceAccount") != null) {
             conditions.add("source_account = :sourceAccount");
             params.addValue("sourceAccount", filters.get("sourceAccount").toString());

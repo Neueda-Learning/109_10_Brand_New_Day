@@ -399,6 +399,16 @@ public class PaymentServiceImpl implements PaymentService {
             validatedFilters.put("type", parseEnum(PaymentType.class, type.toString(), "type").name());
         }
 
+        Object paymentMethod = filters.get("paymentMethod");
+        if (paymentMethod != null) {
+            validatedFilters.put("paymentMethod", parseEnum(PaymentMethod.class, paymentMethod.toString(), "paymentMethod").name());
+        }
+
+        Object approvalStatus = filters.get("approvalStatus");
+        if (approvalStatus != null) {
+            validatedFilters.put("approvalStatus", parseEnum(ApprovalStatus.class, approvalStatus.toString(), "approvalStatus").name());
+        }
+
         if (filters.get("sourceAccount") != null) {
             validatedFilters.put("sourceAccount", filters.get("sourceAccount"));
         }

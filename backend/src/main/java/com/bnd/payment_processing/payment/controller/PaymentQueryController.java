@@ -44,6 +44,8 @@ public class PaymentQueryController {
     public Map<String, Object> searchPayments(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String type,
+            @RequestParam(required = false) String paymentMethod,
+            @RequestParam(required = false) String approvalStatus,
             @RequestParam(required = false) String sourceAccount,
             @RequestParam(required = false) String destinationAccount,
             @RequestParam(required = false) LocalDate fromDate,
@@ -63,6 +65,12 @@ public class PaymentQueryController {
         }
         if (type != null) {
             filters.put("type", type);
+        }
+        if (paymentMethod != null) {
+            filters.put("paymentMethod", paymentMethod);
+        }
+        if (approvalStatus != null) {
+            filters.put("approvalStatus", approvalStatus);
         }
         if (sourceAccount != null) {
             filters.put("sourceAccount", sourceAccount);

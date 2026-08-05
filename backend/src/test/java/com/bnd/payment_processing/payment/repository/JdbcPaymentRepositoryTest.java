@@ -323,6 +323,29 @@ class JdbcPaymentRepositoryTest {
     }
 
     @Test
+    void search_filterByPaymentMethodAndApprovalStatus_returnsOnlyMatchingRows() {
+        Payment matching = newSearchTestRow(PaymentStatus.CREATED, PaymentType.REFUND, Instant.now());
+        matching.setPaymentMethod(PaymentMethod.BANK_TRANSFER);
+        matching.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
+        paymentRepository.insert(matching);
+
+        Payment nonMatching = newSearchTestRow(PaymentStatus.CREATED, PaymentType.REFUND, Instant.now());
+        nonMatching.setPaymentMethod(PaymentMethod.BANK_TRANSFER);
+        nonMatching.setApprovalStatus(ApprovalStatus.APPROVED);
+        paymentRepository.insert(nonMatching);
+
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("sourceAccount", SEARCH_TEST_SOURCE);
+        filters.put("paymentMethod", "BANK_TRANSFER");
+        filters.put("approvalStatus", "PENDING_APPROVAL");
+
+        List<Payment> results = paymentRepository.search(filters, 0, 20);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).getId()).isEqualTo(matching.getId());
+    }
+
+    @Test
     void countSearch_matchesSizeOfSearchResultsForSameFilters() {
         paymentRepository.insert(newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, Instant.now()));
         paymentRepository.insert(newSearchTestRow(PaymentStatus.CREATED, PaymentType.PAYMENT, Instant.now()));
