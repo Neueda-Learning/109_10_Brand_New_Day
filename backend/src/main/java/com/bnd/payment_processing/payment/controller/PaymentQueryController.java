@@ -1,7 +1,5 @@
 package com.bnd.payment_processing.payment.controller;
 
-import com.bnd.payment_processing.payment.dto.PaymentInsightsResponse;
-import com.bnd.payment_processing.payment.service.PaymentAnalyticsService;
 import com.bnd.payment_processing.payment.service.PaymentService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,41 +11,28 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * {@code GET /api/payments} list/filter/search endpoint (spec.md Section 10.3) and
- * {@code GET /api/payments/insights} aggregate endpoint (spec.md Section 10.10).
- * Owner: M4 (Karuna).
+ * {@code GET /api/payments} list/filter/search endpoint (product.md Section 10.1).
+ * The old {@code /insights} aggregate endpoint was replaced by
+ * {@code GET /api/business/dashboard} (see the {@code business} package).
  */
 @RestController
 @RequestMapping("/api/payments")
 public class PaymentQueryController {
 
     private final PaymentService paymentService;
-    private final PaymentAnalyticsService paymentAnalyticsService;
 
-    public PaymentQueryController(PaymentService paymentService, PaymentAnalyticsService paymentAnalyticsService) {
+    public PaymentQueryController(PaymentService paymentService) {
         this.paymentService = paymentService;
-        this.paymentAnalyticsService = paymentAnalyticsService;
-    }
-
-    // Literal "/insights" segment - must not collide with PaymentController's "/{id}"
-    // path variable (spec.md Section 10.10 routing note; proven by a MockMvc test).
-    @GetMapping("/insights")
-    public PaymentInsightsResponse getInsights(
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) String type,
-            @RequestParam(required = false) LocalDate fromDate,
-            @RequestParam(required = false) LocalDate toDate) {
-        return paymentAnalyticsService.getInsights(status, type, fromDate, toDate);
     }
 
     @GetMapping
     public Map<String, Object> searchPayments(
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) String type,
-            @RequestParam(required = false) String paymentMethod,
-            @RequestParam(required = false) String approvalStatus,
-            @RequestParam(required = false) String sourceAccount,
-            @RequestParam(required = false) String destinationAccount,
+            @RequestParam(required = false) String settlementStatus,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) String customerId,
+            @RequestParam(required = false) String invoiceNumber,
+            @RequestParam(required = false) String methodType,
             @RequestParam(required = false) LocalDate fromDate,
             @RequestParam(required = false) LocalDate toDate,
             @RequestParam(defaultValue = "0") int page,
@@ -63,20 +48,20 @@ public class PaymentQueryController {
         if (status != null) {
             filters.put("status", status);
         }
-        if (type != null) {
-            filters.put("type", type);
+        if (settlementStatus != null) {
+            filters.put("settlementStatus", settlementStatus);
         }
-        if (paymentMethod != null) {
-            filters.put("paymentMethod", paymentMethod);
+        if (currency != null) {
+            filters.put("currency", currency);
         }
-        if (approvalStatus != null) {
-            filters.put("approvalStatus", approvalStatus);
+        if (customerId != null) {
+            filters.put("customerId", customerId);
         }
-        if (sourceAccount != null) {
-            filters.put("sourceAccount", sourceAccount);
+        if (invoiceNumber != null) {
+            filters.put("invoiceNumber", invoiceNumber);
         }
-        if (destinationAccount != null) {
-            filters.put("destinationAccount", destinationAccount);
+        if (methodType != null) {
+            filters.put("methodType", methodType);
         }
         if (fromDate != null) {
             filters.put("fromDate", fromDate);

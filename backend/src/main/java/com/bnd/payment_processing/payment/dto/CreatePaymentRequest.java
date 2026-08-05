@@ -1,29 +1,29 @@
 package com.bnd.payment_processing.payment.dto;
 
-import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 
-import java.math.BigDecimal;
+import java.util.UUID;
 
 /**
- * Request body for {@code POST /api/payments} (spec.md Section 10.1).
- * Validation rules are defined in Section 9 (M1).
+ * Request body for {@code POST /api/payments} (product.md Section 10.1).
  */
 public class CreatePaymentRequest {
 
-    @NotBlank
-    private String sourceAccount;
-
-    @NotBlank
-    private String destinationAccount;
+    @NotNull
+    private UUID invoiceId;
 
     @NotNull
-    @DecimalMin(value = "0.0", inclusive = false)
-    @Digits(integer = 16, fraction = 2, message = "amount must have at most 2 decimal places")
-    private BigDecimal amount;
+    private UUID customerId;
+
+    @NotBlank
+    private String paymentMethodType;
+
+    @NotBlank
+    private String maskedIdentifier;
+
+    private String tokenRef;
 
     @NotBlank
     @Pattern(regexp = "[A-Za-z]{3}", message = "currency must be a 3-letter ISO code")
@@ -32,35 +32,47 @@ public class CreatePaymentRequest {
     @NotBlank
     private String idempotencyKey;
 
-    // Added 2026-08-05 (spec.md Section 10.1, v2.2): optional; defaults server-side
-    // to BANK_TRANSFER if omitted. "BANK_TRANSFER" is the only supported value today.
-    private String paymentMethod;
-
     public CreatePaymentRequest() {
     }
 
-    public String getSourceAccount() {
-        return sourceAccount;
+    public UUID getInvoiceId() {
+        return invoiceId;
     }
 
-    public void setSourceAccount(String sourceAccount) {
-        this.sourceAccount = sourceAccount;
+    public void setInvoiceId(UUID invoiceId) {
+        this.invoiceId = invoiceId;
     }
 
-    public String getDestinationAccount() {
-        return destinationAccount;
+    public UUID getCustomerId() {
+        return customerId;
     }
 
-    public void setDestinationAccount(String destinationAccount) {
-        this.destinationAccount = destinationAccount;
+    public void setCustomerId(UUID customerId) {
+        this.customerId = customerId;
     }
 
-    public BigDecimal getAmount() {
-        return amount;
+    public String getPaymentMethodType() {
+        return paymentMethodType;
     }
 
-    public void setAmount(BigDecimal amount) {
-        this.amount = amount;
+    public void setPaymentMethodType(String paymentMethodType) {
+        this.paymentMethodType = paymentMethodType;
+    }
+
+    public String getMaskedIdentifier() {
+        return maskedIdentifier;
+    }
+
+    public void setMaskedIdentifier(String maskedIdentifier) {
+        this.maskedIdentifier = maskedIdentifier;
+    }
+
+    public String getTokenRef() {
+        return tokenRef;
+    }
+
+    public void setTokenRef(String tokenRef) {
+        this.tokenRef = tokenRef;
     }
 
     public String getCurrency() {
@@ -77,13 +89,5 @@ public class CreatePaymentRequest {
 
     public void setIdempotencyKey(String idempotencyKey) {
         this.idempotencyKey = idempotencyKey;
-    }
-
-    public String getPaymentMethod() {
-        return paymentMethod;
-    }
-
-    public void setPaymentMethod(String paymentMethod) {
-        this.paymentMethod = paymentMethod;
     }
 }

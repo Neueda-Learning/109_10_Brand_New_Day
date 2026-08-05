@@ -1,12 +1,9 @@
 package com.bnd.payment_processing.payment.controller;
 
-import com.bnd.payment_processing.payment.dto.ApproveRefundRequest;
 import com.bnd.payment_processing.payment.dto.CreatePaymentRequest;
 import com.bnd.payment_processing.payment.dto.PaymentHistoryEntry;
 import com.bnd.payment_processing.payment.dto.PaymentResponse;
 import com.bnd.payment_processing.payment.dto.ProcessRequest;
-import com.bnd.payment_processing.payment.dto.RefundRequest;
-import com.bnd.payment_processing.payment.dto.RejectRefundRequest;
 import com.bnd.payment_processing.payment.service.PaymentService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -16,9 +13,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Endpoints owned by M1 (create/get), M2 (process/history) and M3 (refund) -
- * spec.md Section 9. Kept in a single controller since they all operate on
- * the same {@code /api/payments} resource path.
+ * Payment creation and lifecycle endpoints (product.md Section 10.1 / 10.2).
+ * Refund creation/approval/rejection live in
+ * {@code com.bnd.payment_processing.refund.controller.RefundController}.
  */
 @RestController
 @RequestMapping("/api/payments")
@@ -29,8 +26,6 @@ public class PaymentController {
     public PaymentController(PaymentService paymentService) {
         this.paymentService = paymentService;
     }
-
-    // --- M1 ---
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -43,8 +38,6 @@ public class PaymentController {
         return paymentService.getPayment(id);
     }
 
-    // --- M2 ---
-
     @PostMapping("/{id}/process")
     public PaymentResponse processTransition(@PathVariable UUID id, @RequestBody(required = false) ProcessRequest request) {
         return paymentService.processTransition(id, request);
@@ -53,25 +46,5 @@ public class PaymentController {
     @GetMapping("/{id}/history")
     public List<PaymentHistoryEntry> getHistory(@PathVariable UUID id) {
         return paymentService.getHistory(id);
-    }
-
-    // --- M3 ---
-
-    @PostMapping("/{id}/refund")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PaymentResponse createRefund(@PathVariable UUID id, @Valid @RequestBody RefundRequest request) {
-        return paymentService.createRefund(id, request);
-    }
-
-    // Added 2026-08-05 (spec.md Section 10.8, v2.2)
-    @PostMapping("/{id}/refund/approve")
-    public PaymentResponse approveRefund(@PathVariable UUID id, @Valid @RequestBody ApproveRefundRequest request) {
-        return paymentService.approveRefund(id, request);
-    }
-
-    // Added 2026-08-05 (spec.md Section 10.9, v2.2)
-    @PostMapping("/{id}/refund/reject")
-    public PaymentResponse rejectRefund(@PathVariable UUID id, @Valid @RequestBody RejectRefundRequest request) {
-        return paymentService.rejectRefund(id, request);
     }
 }

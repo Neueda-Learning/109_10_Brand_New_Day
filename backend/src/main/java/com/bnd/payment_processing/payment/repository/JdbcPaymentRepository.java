@@ -1,15 +1,12 @@
 package com.bnd.payment_processing.payment.repository;
 
-import com.bnd.payment_processing.payment.model.ApprovalStatus;
 import com.bnd.payment_processing.payment.model.Payment;
-import com.bnd.payment_processing.payment.model.PaymentMethod;
 import com.bnd.payment_processing.payment.model.PaymentStatus;
-import com.bnd.payment_processing.payment.model.PaymentType;
+import com.bnd.payment_processing.payment.model.SettlementStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -24,7 +21,7 @@ import java.util.UUID;
 
 /**
  * Spring JDBC implementation of {@link PaymentRepository} (no JPA/Hibernate,
- * per spec.md Section 4). Method bodies are stubs until Phase 2.
+ * per spec.md Section 4).
  */
 @Repository
 public class JdbcPaymentRepository implements PaymentRepository {
@@ -39,35 +36,28 @@ public class JdbcPaymentRepository implements PaymentRepository {
     public Payment insert(Payment payment) {
         String sql = """
             INSERT INTO payments
-            (id, idempotency_key, source_account, destination_account, amount, currency,
-             status, error_code, type, original_payment_id, payment_method, approval_status,
-             approved_by, approved_at, rejection_reason, created_at, updated_at)
-            VALUES (:id, :idempotencyKey, :sourceAccount, :destinationAccount, :amount, :currency,
-             :status, :errorCode, :type, :originalPaymentId, :paymentMethod, :approvalStatus,
-             :approvedBy, :approvedAt, :rejectionReason, :createdAt, :updatedAt)
+            (id, invoice_id, customer_id, payment_method_id, idempotency_key, amount, currency,
+             exchange_rate_id, fx_rate, usd_amount, status, settlement_status, error_code,
+             created_at, updated_at)
+            VALUES (:id, :invoiceId, :customerId, :paymentMethodId, :idempotencyKey, :amount, :currency,
+             :exchangeRateId, :fxRate, :usdAmount, :status, :settlementStatus, :errorCode,
+             :createdAt, :updatedAt)
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("id", payment.getId().toString())
+                .addValue("invoiceId", payment.getInvoiceId().toString())
+                .addValue("customerId", payment.getCustomerId().toString())
+                .addValue("paymentMethodId", payment.getPaymentMethodId() == null ? null : payment.getPaymentMethodId().toString())
                 .addValue("idempotencyKey", payment.getIdempotencyKey())
-                .addValue("sourceAccount", payment.getSourceAccount())
-                .addValue("destinationAccount", payment.getDestinationAccount())
                 .addValue("amount", payment.getAmount())
                 .addValue("currency", payment.getCurrency())
+                .addValue("exchangeRateId", payment.getExchangeRateId() == null ? null : payment.getExchangeRateId().toString())
+                .addValue("fxRate", payment.getFxRate())
+                .addValue("usdAmount", payment.getUsdAmount())
                 .addValue("status", payment.getStatus().name())
+                .addValue("settlementStatus", payment.getSettlementStatus().name())
                 .addValue("errorCode", payment.getErrorCode())
-                .addValue("type", payment.getType().name())
-                .addValue("originalPaymentId",
-                        payment.getOriginalPaymentId() == null ? null : payment.getOriginalPaymentId().toString())
-                // paymentMethod defaults to BANK_TRANSFER here as a safety net in case a
-                // caller forgot to set it - spec.md Section 10.1 (v2.2), NOT NULL column.
-                .addValue("paymentMethod",
-                        (payment.getPaymentMethod() == null ? PaymentMethod.BANK_TRANSFER : payment.getPaymentMethod()).name())
-                .addValue("approvalStatus",
-                        payment.getApprovalStatus() == null ? null : payment.getApprovalStatus().name())
-                .addValue("approvedBy", payment.getApprovedBy())
-                .addValue("approvedAt", payment.getApprovedAt() == null ? null : Timestamp.from(payment.getApprovedAt()))
-                .addValue("rejectionReason", payment.getRejectionReason())
                 .addValue("createdAt", Timestamp.from(payment.getCreatedAt()))
                 .addValue("updatedAt", Timestamp.from(payment.getUpdatedAt()));
 
@@ -127,6 +117,23 @@ public class JdbcPaymentRepository implements PaymentRepository {
     }
 
     @Override
+    public int updateSettlementStatusIfCurrent(UUID id, String expectedCurrentSettlementStatus, String newSettlementStatus) {
+        String sql = """
+                UPDATE payments
+                SET settlement_status = :newSettlementStatus, updated_at = :updatedAt
+                WHERE id = :id AND settlement_status = :expectedCurrentSettlementStatus
+                """;
+
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("newSettlementStatus", newSettlementStatus)
+                .addValue("updatedAt", Timestamp.from(Instant.now()))
+                .addValue("id", id.toString())
+                .addValue("expectedCurrentSettlementStatus", expectedCurrentSettlementStatus);
+
+        return jdbcTemplate.update(sql, params);
+    }
+
+    @Override
     public List<Payment> search(Map<String, Object> filters, int page, int size) {
         MapSqlParameterSource params = new MapSqlParameterSource();
         String whereClause = buildWhereClause(filters, params);
@@ -147,9 +154,10 @@ public class JdbcPaymentRepository implements PaymentRepository {
     }
 
     /**
-     * Builds the optional "WHERE ..." clause for GET /api/payments (spec.md Section
-     * 10.3) from whichever of status/type/sourceAccount/destinationAccount/fromDate/
-     * toDate are present in {@code filters}, populating {@code params} to match.
+     * Builds the optional "WHERE ..." clause for GET /api/payments (product.md
+     * Section 10.2) from whichever of status/settlementStatus/currency/customerId/
+     * invoiceId/methodType/fromDate/toDate are present in {@code filters}.
+     * methodType requires a join to payment_methods since it's not a payments column.
      */
     private String buildWhereClause(Map<String, Object> filters, MapSqlParameterSource params) {
         List<String> conditions = new ArrayList<>();
@@ -158,25 +166,25 @@ public class JdbcPaymentRepository implements PaymentRepository {
             conditions.add("status = :status");
             params.addValue("status", filters.get("status").toString());
         }
-        if (filters.get("type") != null) {
-            conditions.add("type = :type");
-            params.addValue("type", filters.get("type").toString());
+        if (filters.get("settlementStatus") != null) {
+            conditions.add("settlement_status = :settlementStatus");
+            params.addValue("settlementStatus", filters.get("settlementStatus").toString());
         }
-        if (filters.get("paymentMethod") != null) {
-            conditions.add("payment_method = :paymentMethod");
-            params.addValue("paymentMethod", filters.get("paymentMethod").toString());
+        if (filters.get("currency") != null) {
+            conditions.add("currency = :currency");
+            params.addValue("currency", filters.get("currency").toString());
         }
-        if (filters.get("approvalStatus") != null) {
-            conditions.add("approval_status = :approvalStatus");
-            params.addValue("approvalStatus", filters.get("approvalStatus").toString());
+        if (filters.get("customerId") != null) {
+            conditions.add("customer_id = :customerId");
+            params.addValue("customerId", filters.get("customerId").toString());
         }
-        if (filters.get("sourceAccount") != null) {
-            conditions.add("source_account = :sourceAccount");
-            params.addValue("sourceAccount", filters.get("sourceAccount").toString());
+        if (filters.get("invoiceId") != null) {
+            conditions.add("invoice_id = :invoiceId");
+            params.addValue("invoiceId", filters.get("invoiceId").toString());
         }
-        if (filters.get("destinationAccount") != null) {
-            conditions.add("destination_account = :destinationAccount");
-            params.addValue("destinationAccount", filters.get("destinationAccount").toString());
+        if (filters.get("methodType") != null) {
+            conditions.add("payment_method_id IN (SELECT id FROM payment_methods WHERE method_type = :methodType)");
+            params.addValue("methodType", filters.get("methodType").toString());
         }
         if (filters.get("fromDate") instanceof LocalDate fromDate) {
             conditions.add("created_at >= :fromInstant");
@@ -190,72 +198,23 @@ public class JdbcPaymentRepository implements PaymentRepository {
         return conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
     }
 
-    @Override
-    public BigDecimal sumRefundedAmount(UUID originalPaymentId) {
-        String sql = """
-            SELECT COALESCE(SUM(amount), 0) FROM payments
-            WHERE original_payment_id = :originalPaymentId AND type = 'REFUND'
-            """;
-        BigDecimal sum = jdbcTemplate.queryForObject(
-                sql,
-                new MapSqlParameterSource("originalPaymentId", originalPaymentId.toString()),
-                BigDecimal.class
-        );
-        return sum == null ? BigDecimal.ZERO : sum;
-    }
-
-    @Override
-    public int approveRefund(UUID id, String approvedBy, Instant approvedAt) {
-        String sql = """
-            UPDATE payments
-            SET approval_status = 'APPROVED', approved_by = :approvedBy, approved_at = :approvedAt,
-                updated_at = :updatedAt
-            WHERE id = :id AND type = 'REFUND' AND approval_status = 'PENDING_APPROVAL'
-            """;
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("id", id.toString())
-                .addValue("approvedBy", approvedBy)
-                .addValue("approvedAt", Timestamp.from(approvedAt))
-                .addValue("updatedAt", Timestamp.from(approvedAt));
-        return jdbcTemplate.update(sql, params);
-    }
-
-    @Override
-    public int rejectRefund(UUID id, String rejectionReason) {
-        String sql = """
-            UPDATE payments
-            SET approval_status = 'REJECTED', rejection_reason = :rejectionReason,
-                status = 'FAILED', error_code = 'REFUND_REJECTED', updated_at = :updatedAt
-            WHERE id = :id AND type = 'REFUND' AND approval_status = 'PENDING_APPROVAL'
-            """;
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("id", id.toString())
-                .addValue("rejectionReason", rejectionReason)
-                .addValue("updatedAt", Timestamp.from(Instant.now()));
-        return jdbcTemplate.update(sql, params);
-    }
-
     private Payment mapRow(ResultSet rs, int rowNum) throws SQLException {
         Payment p = new Payment();
         p.setId(UUID.fromString(rs.getString("id")));
+        p.setInvoiceId(UUID.fromString(rs.getString("invoice_id")));
+        p.setCustomerId(UUID.fromString(rs.getString("customer_id")));
+        String paymentMethodId = rs.getString("payment_method_id");
+        p.setPaymentMethodId(paymentMethodId == null ? null : UUID.fromString(paymentMethodId));
         p.setIdempotencyKey(rs.getString("idempotency_key"));
-        p.setSourceAccount(rs.getString("source_account"));
-        p.setDestinationAccount(rs.getString("destination_account"));
         p.setAmount(rs.getBigDecimal("amount"));
         p.setCurrency(rs.getString("currency"));
+        String exchangeRateId = rs.getString("exchange_rate_id");
+        p.setExchangeRateId(exchangeRateId == null ? null : UUID.fromString(exchangeRateId));
+        p.setFxRate(rs.getBigDecimal("fx_rate"));
+        p.setUsdAmount(rs.getBigDecimal("usd_amount"));
         p.setStatus(PaymentStatus.valueOf(rs.getString("status")));
+        p.setSettlementStatus(SettlementStatus.valueOf(rs.getString("settlement_status")));
         p.setErrorCode(rs.getString("error_code"));
-        p.setType(PaymentType.valueOf(rs.getString("type")));
-        String originalPaymentId = rs.getString("original_payment_id");
-        p.setOriginalPaymentId(originalPaymentId == null ? null : UUID.fromString(originalPaymentId));
-        String paymentMethod = rs.getString("payment_method");
-        p.setPaymentMethod(paymentMethod == null ? null : PaymentMethod.valueOf(paymentMethod));
-        String approvalStatus = rs.getString("approval_status");
-        p.setApprovalStatus(approvalStatus == null ? null : ApprovalStatus.valueOf(approvalStatus));
-        p.setApprovedBy(rs.getString("approved_by"));
-        Timestamp approvedAt = rs.getTimestamp("approved_at");
-        p.setApprovedAt(approvedAt == null ? null : approvedAt.toInstant());
-        p.setRejectionReason(rs.getString("rejection_reason"));
         p.setCreatedAt(rs.getTimestamp("created_at").toInstant());
         p.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
         return p;

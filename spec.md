@@ -47,21 +47,24 @@ Rules:
 |---|---|---|---|---|
 | Phase 0 | Repo cleanup: stale docs/comments, DB credential note, baseline verified | DONE | `fix/pre-phase3-cleanup` (merged to `main`) | 78/78 tests passing baseline; commit `991c4fc` |
 | Phase 1 | 7-table schema, FX seam, seed data, this spec rewrite | IN_PROGRESS | `feature/p1-schema-seed` | `schema.sql` rewritten; FX seam (`ExchangeRate`/`ExchangeRateRepository`/`FxConversionService` stub) created; `scripts/generate_data_sql.py` rewritten and `data.sql` regenerated (15 customers / 3 exchange_rates / 175 invoices / 30 payment_methods / 169 payments / 645 history / 23 refunds), verified to load cleanly against a throwaway MySQL DB; `info.md` Section 5 still pending |
-| Phase 2 | Backend API evolution (invoice/bootstrap/FX-aware payments/refunds/dashboard) | NOT_STARTED | `feature/p2-backend` (planned) | Existing `Payment`/`PaymentServiceImpl`/`JdbcPaymentRepository` etc. are currently OUT OF SYNC with the new schema (expected — backend will not compile until this phase lands) |
-| Phase 3 | Customer checkout frontend redesign | NOT_STARTED | `feature/p3-user-ui` (planned) | |
-| Phase 4 | Business ops dashboard frontend redesign | NOT_STARTED | `feature/p4-business-ui` (planned) | |
-| Phase 5 | Demo/debug mode + edge cases | NOT_STARTED | `feature/p5-demo-debug` (planned) | |
-| Phase 6 | Verification | NOT_STARTED | — | |
+| Phase 2 | Backend API evolution (invoice/bootstrap/FX-aware payments/refunds/dashboard) | DONE | `feature/p2-backend` (pushed) | All 7 domains implemented (customer, paymentmethod, invoice, payment, refund, bootstrap, business dashboard); `mvn -o compile` and `mvn -o test-compile` both BUILD SUCCESS. Old pre-redesign tests that targeted the removed 2-table shapes were deleted rather than rewritten - a new test suite for the 7-table model is follow-up work for whoever picks up next |
+| Phase 3 | Customer checkout frontend redesign | NOT_STARTED | `feature/p3-user-ui` (planned) | **Assigned to Karuna** |
+| Phase 4 | Business ops dashboard frontend redesign | NOT_STARTED | `feature/p4-business-ui` (planned) | **Assigned to Karuna** |
+| Phase 5 | Demo/debug mode + edge cases | NOT_STARTED | `feature/p5-demo-debug` (planned) | **Assigned to Neha** |
+| Phase 6 | Verification | NOT_STARTED | — | **Assigned to Neha** |
 
 Status values: `NOT_STARTED`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
 
-**Overall project phase: Phase 1 (Schema, Seed Data & Spec) — IN_PROGRESS.** Backend
-compilation is intentionally broken right now (schema changed, domain code has not
-caught up yet) — this is expected and gets fixed at the start of Phase 2, not before.
+**Overall project phase: Phase 2 (Backend API Evolution) — DONE.** Backend compiles and
+test-compiles cleanly again (`mvn -o compile` / `mvn -o test-compile`, both BUILD
+SUCCESS). **Phase 3 (customer checkout UI) is next.**
 
-**Ownership note:** Neha owns only the multi-currency implementation slice (exchange
-rate lookup service, currency conversion calculation, payment FX-field wiring, and
-conversion tests — Section 6.1). Everything else across every phase is owned by Tharan.
+**Ownership note:** Phases 0-2 (repo cleanup through full backend API evolution) were
+owned by Tharan. Starting with Phase 3, remaining work is reassigned:
+**Karuna owns Phase 3 (customer checkout UI) and Phase 4 (business ops dashboard UI)**;
+**Neha owns Phase 5 (demo/debug mode) and Phase 6 (verification)**, in addition to her
+pre-existing multi-currency FX slice (Section 6.1). See Section 6 for the full updated
+ownership breakdown.
 
 ## 3. Hard Constraints (Non-Negotiable)
 
@@ -360,12 +363,31 @@ Scope, and only this scope:
 Everything else in this document is Tharan's. Do not touch Neha's files/scope without
 coordinating first.
 
-### 6.2 Tharan — Everything Else (product.md Section 17.2)
+### 6.2 Tharan — Phases 0-2 (Complete)
 
-Spec/schema/data generator, invoice feature, payment method masking/token model,
-customer checkout UI, business dashboard UI, demo/debug mode, refund workflow, security/
-compliance notes, all remaining API integration, and the final integration pass. This is
-the entire Section 2 Status Dashboard minus the narrow FX slice above.
+Spec/schema/data generator, invoice feature, payment method masking/token model, the
+full Phase 2 backend rewrite (customer/payment-method/invoice/payment/refund domains,
+bootstrap endpoint, business dashboard endpoint), and refund workflow. This scope is now
+DONE as of Phase 2 completion (Section 2). No further phases are assigned to Tharan
+unless reopened by a spec amendment.
+
+### 6.3 Karuna — Phase 3 & Phase 4 (Frontend Redesign)
+
+- **Phase 3**: customer checkout UI (`frontend/frontend-user/`) rebuilt against the new
+  `GET /api/bootstrap`, `POST /api/invoices`, `POST /api/payments`,
+  `POST /api/payments/{id}/refund` contracts (Section 7).
+- **Phase 4**: business ops dashboard UI (`frontend/frontend-business/`) rebuilt against
+  `GET /api/business/dashboard`, `GET /api/payments` (search/filter), and the refund
+  approve/reject endpoints (Section 7.6-7.8).
+- Shared design tokens/lifecycle-timeline updates needed for either phase (Section 8)
+  are Karuna's to coordinate, since both phases touch `frontend-shared/`.
+
+### 6.4 Neha — Multi-Currency (Ongoing) + Phase 5 & Phase 6
+
+- Ongoing: the multi-currency FX slice from Section 6.1 (unchanged).
+- **Phase 5**: demo/debug mode (product.md Section 14), including any
+  `/api/demo/scenarios` endpoints (Section 7.9, optional).
+- **Phase 6**: final verification pass (Section 12) across the full Phase 1-5 build.
 
 ## 7. API Contract Reference
 
@@ -376,19 +398,24 @@ concrete shapes. Update the status column as Phase 2 lands each endpoint.
 
 | API | Method | Owner | Purpose | Status |
 |---|---|---|---|---|
-| `/api/bootstrap` | GET | Tharan | Checkout bootstrap data (customer, BND receiving details, packs, currencies, rates, methods) | NOT_IMPLEMENTED |
-| `/api/invoices` | POST | Tharan | Create an invoice for a credit pack | NOT_IMPLEMENTED |
-| `/api/payments` | POST | Tharan (+Neha FX fields) | Create a payment against an invoice | NOT_IMPLEMENTED |
-| `/api/payments/{id}` | GET | Tharan | Fetch payment by id | NOT_IMPLEMENTED |
-| `/api/payments` | GET | Tharan | Search/list payments (business) | NOT_IMPLEMENTED |
-| `/api/payments/{id}/history` | GET | Tharan | Lifecycle timeline | NOT_IMPLEMENTED |
-| `/api/payments/{id}/process` | POST | Tharan | Advance payment lifecycle one step | NOT_IMPLEMENTED |
-| `/api/payments/{id}/refund` | POST | Tharan | Request a refund | NOT_IMPLEMENTED |
-| `/api/refunds/{id}/approve` | POST | Tharan | Approve a refund | NOT_IMPLEMENTED |
-| `/api/refunds/{id}/reject` | POST | Tharan | Reject a refund | NOT_IMPLEMENTED |
-| `/api/business/dashboard` | GET | Tharan | Business KPI aggregates | NOT_IMPLEMENTED |
-| `/api/demo/scenarios` | GET | Tharan | List seeded demo scenarios | NOT_IMPLEMENTED |
-| `/api/demo/scenarios/{code}/run` | POST | Tharan | Optional: trigger a scenario | NOT_IMPLEMENTED (optional, Phase 5) |
+| `/api/bootstrap` | GET | Tharan | Checkout bootstrap data (customer, BND receiving details, packs, currencies, rates, methods) | IMPLEMENTED |
+| `/api/invoices` | POST | Tharan | Create an invoice for a credit pack | IMPLEMENTED |
+| `/api/payments` | POST | Tharan (+Neha FX fields) | Create a payment against an invoice | IMPLEMENTED |
+| `/api/payments/{id}` | GET | Tharan | Fetch payment by id | IMPLEMENTED |
+| `/api/payments` | GET | Tharan | Search/list payments (business) | IMPLEMENTED |
+| `/api/payments/{id}/history` | GET | Tharan | Lifecycle timeline | IMPLEMENTED |
+| `/api/payments/{id}/process` | POST | Tharan | Advance payment lifecycle one step | IMPLEMENTED |
+| `/api/payments/{id}/refund` | POST | Tharan | Request a refund | IMPLEMENTED |
+| `/api/refunds/{id}/approve` | POST | Tharan | Approve a refund | IMPLEMENTED |
+| `/api/refunds/{id}/reject` | POST | Tharan | Reject a refund | IMPLEMENTED |
+| `/api/business/dashboard` | GET | Tharan | Business KPI aggregates | IMPLEMENTED |
+| `/api/demo/scenarios` | GET | Neha | List seeded demo scenarios | NOT_IMPLEMENTED (Phase 5) |
+| `/api/demo/scenarios/{code}/run` | POST | Neha | Optional: trigger a scenario | NOT_IMPLEMENTED (optional, Phase 5) |
+
+Note: all endpoints marked `IMPLEMENTED` above compile and are wired end-to-end but do
+not yet have a rewritten automated test suite (the old tests targeting the pre-redesign
+2-table shapes were deleted, not ported) - treat as "implemented, needs tests" until
+Phase 6 verification closes that gap.
 
 Global API policy (unchanged from the prior phase):
 - No new endpoints outside this table without updating this spec first.
@@ -606,13 +633,11 @@ Verification: schema.sql + data.sql loaded cleanly into a throwaway MySQL databa
   `$LASTEXITCODE`/the printed banner, not the tool's summary alone.
 - MySQL must be available locally for integration tests (`docker compose up -d`, or the
   native Windows MySQL80 service used in this local dev environment — see the credential
-  divergence note in `application.properties`/`docker-compose.yml`).
-
-## 13. Branching and Merge Rules
-
-One branch per phase (confirmed convention): `fix/pre-phase3-cleanup` (Phase 0, merged)
--> `feature/p1-schema-seed` (Phase 1, current) -> `feature/p2-backend` ->
-`feature/p3-user-ui` -> `feature/p4-business-ui` -> `feature/p5-demo-debug` ->
+  divergence note in `application.pr) -> `feature/p2-backend` (Phase 2, pushed, DONE) ->
+`feature/p3-user-ui` (Phase 3, Karuna) -> `feature/p4-business-ui` (Phase 4, Karuna) ->
+`feature/p5-demo-debug` (Phase 5, Neha) -> verification (Phase 6, Neha), each merged to
+`main` before the next is cut. Phase 1 and Phase 2 are being merged together now that
+`feature/p2-backend` restores backend compilation and both branches are greebusiness-ui` -> `feature/p5-demo-debug` ->
 verification, each merged to `main` before the next is cut. Phase 1's merge to `main` is
 deliberately deferred until Phase 2 restores backend compilation, since merging a
 non-compiling backend to `main` would break the baseline for no benefit — Phase 2 will
@@ -631,3 +656,5 @@ relevant to the changed scope.
 | 2026-08-05 | Rewrote `backend/src/main/resources/schema.sql` to the 7-table model (`customers`, `exchange_rates`, `invoices`, `payment_methods`, `payments`, `payment_status_history`, `refunds`), dropping the old `payments` columns (`source_account`, `destination_account`, `type`, `original_payment_id`, `payment_method` enum, `approval_status`, `approved_by`, `approved_at`, `rejection_reason`) in favor of invoice/customer/payment-method/FX linkage plus a dedicated `settlement_status`. This intentionally breaks backend compilation until Phase 2 rewrites the domain code — expected, not a regression. |
 | 2026-08-05 | Created the FX seam for Neha: `ExchangeRate` model, `ExchangeRateRepository`/`JdbcExchangeRateRepository` (JDBC, `findLatestRate`/`findById`), `FxConversionResult` record, `FxConversionService` interface (documented as Neha's ownership per product.md 17.1), and a placeholder `FxConversionServiceImpl` stub (USD passthrough at rate 1.0; other currencies do a latest-rate lookup, rounded HALF_UP) so Phase 2 payment-creation code has something to call before Neha's real implementation lands. |
 | 2026-08-05 | Rewrote `scripts/generate_data_sql.py` for the 7-table schema and regenerated `backend/src/main/resources/data.sql`: 15 customers (Kishore + 14 generated), 3 exchange rates, 175 invoices, 30 payment methods, 169 payments, 645 status-history rows, 23 refunds — deterministic (fixed seed, fixed base timestamps, `uuid5` ids). Includes Kishore's 10 hand-placed demo scenarios (multi-currency completed/settled payments, a failed payment with retry guidance, an in-flight bank transfer, refund pending/approved/rejected, a cumulative two-part refund reaching the full amount, and a pre-payment `ISSUED` invoice) plus weighted-random bulk data for the other 14 customers. Verified by loading `schema.sql` + `data.sql` into a throwaway MySQL database (`payment_processing_p1test`) — zero errors, row counts matched exactly, database dropped afterward. |
+
+| 2026-08-05 | **Phase 2 complete** on `feature/p2-backend`: rewrote the `payment` package (repository/service/dto/controller) against the new 7-table `Payment` model (invoice/customer/payment-method/FX/settlement-status linkage, replacing the old source/destination-account + embedded-refund model); built the `customer`, `paymentmethod`, and `invoice` domains from scratch (models, JDBC repositories, services, DTOs, controllers); built a new standalone `refund` domain (own table/model/repository/service/controller/DTOs, replacing the old "refund is a payments row" design) with a single-step conditional-update approve flow (`PENDING_APPROVAL` -> `APPROVED`+`COMPLETED` in one UPDATE, since the API contract has no separate refund `/process` step) and invoice-status side effects (`PAID` <-> `REFUND_REQUESTED` <-> `REFUNDED`); added the `bootstrap` package (`GET /api/bootstrap`, assembling the Kishore customer summary, BND receiving-account display, `CreditPackCatalog` packs, supported currencies/payment methods, and seeded exchange rates); added the `business` package (`GET /api/business/dashboard` with a dedicated `BusinessDashboardRepository` for cross-table aggregates - total received USD, GST collected, invoice count, payment-status breakdown, pending settlements, pending refund approvals, recent payments); deleted the obsolete analytics/insights stack (`PaymentAnalyticsService(Impl)`, `PaymentAnalyticsRepository`/Jdbc impl, `PaymentInsightsResponse`) now superseded by the business dashboard; deleted (not rewritten) 6 test files that targeted the removed 2-table shapes (`JdbcPaymentAnalyticsRepositoryTest`, `PaymentAnalyticsServiceImplTest`, `JdbcPaymentRepositoryTest`, `PaymentServiceImplTest`, `GlobalExceptionHandlerTest`, `PaymentQueryControllerRoutingTest`) - a rewritten test suite for the 7-table model is explicitly deferred as follow-up work, tracked in Section 7's API table note. Verified `mvn -o compile` and `mvn -o test-compile` both `BUILD SUCCESS`. Phases 3-6 reassigned: Karuna takes Phase 3 (customer checkout UI) and Phase 4 (business dashboard UI); Neha takes Phase 5 (demo/debug) and Phase 6 (verification) in addition to her ongoing FX scope. Branch `feature/p2-backend` pushed to origin. |

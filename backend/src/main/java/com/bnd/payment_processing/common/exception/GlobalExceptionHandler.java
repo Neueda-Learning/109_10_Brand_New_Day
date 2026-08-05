@@ -31,6 +31,26 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", ex.getMessage(), request);
     }
 
+    @ExceptionHandler(CustomerNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleCustomerNotFound(CustomerNotFoundException ex, WebRequest request) {
+        return buildError(HttpStatus.NOT_FOUND, "CUSTOMER_NOT_FOUND", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(InvoiceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleInvoiceNotFound(InvoiceNotFoundException ex, WebRequest request) {
+        return buildError(HttpStatus.NOT_FOUND, "INVOICE_NOT_FOUND", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(InvalidInvoiceStateException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidInvoiceState(InvalidInvoiceStateException ex, WebRequest request) {
+        return buildError(HttpStatus.CONFLICT, "INVALID_INVOICE_STATE", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(RefundNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleRefundNotFound(RefundNotFoundException ex, WebRequest request) {
+        return buildError(HttpStatus.NOT_FOUND, "REFUND_NOT_FOUND", ex.getMessage(), request);
+    }
+
     @ExceptionHandler(InvalidStatusTransitionException.class)
     public ResponseEntity<ErrorResponse> handleInvalidStatusTransition(InvalidStatusTransitionException ex, WebRequest request) {
         return buildError(HttpStatus.CONFLICT, "INVALID_STATUS_TRANSITION", ex.getMessage(), request);

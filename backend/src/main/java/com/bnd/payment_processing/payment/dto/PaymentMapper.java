@@ -4,10 +4,10 @@ import com.bnd.payment_processing.payment.model.Payment;
 
 /**
  * Converts the internal {@link Payment} domain model to the public
- * {@link PaymentResponse} shape (spec.md Section 10.1). Shared by
+ * {@link PaymentResponse} shape (product.md Section 10.1). Shared by
  * {@code PaymentServiceImpl} (normal responses) and
- * {@code GlobalExceptionHandler} (the duplicate-idempotency-key short-circuit,
- * spec.md Section 10.7), so the field mapping only lives in one place.
+ * {@code GlobalExceptionHandler} (the duplicate-idempotency-key short-circuit),
+ * so the field mapping only lives in one place.
  */
 public final class PaymentMapper {
 
@@ -15,24 +15,22 @@ public final class PaymentMapper {
     }
 
     public static PaymentResponse toResponse(Payment payment) {
-        PaymentResponse response = new PaymentResponse();
-        response.setId(payment.getId());
-        response.setIdempotencyKey(payment.getIdempotencyKey());
-        response.setSourceAccount(payment.getSourceAccount());
-        response.setDestinationAccount(payment.getDestinationAccount());
-        response.setAmount(payment.getAmount());
-        response.setCurrency(payment.getCurrency());
-        response.setStatus(payment.getStatus());
-        response.setErrorCode(payment.getErrorCode());
-        response.setType(payment.getType());
-        response.setOriginalPaymentId(payment.getOriginalPaymentId());
-        response.setPaymentMethod(payment.getPaymentMethod());
-        response.setApprovalStatus(payment.getApprovalStatus());
-        response.setApprovedBy(payment.getApprovedBy());
-        response.setApprovedAt(payment.getApprovedAt());
-        response.setRejectionReason(payment.getRejectionReason());
-        response.setCreatedAt(payment.getCreatedAt());
-        response.setUpdatedAt(payment.getUpdatedAt());
-        return response;
+        return new PaymentResponse(
+                payment.getId(),
+                payment.getInvoiceId(),
+                payment.getCustomerId(),
+                payment.getPaymentMethodId(),
+                payment.getIdempotencyKey(),
+                payment.getAmount(),
+                payment.getCurrency(),
+                payment.getExchangeRateId(),
+                payment.getFxRate(),
+                payment.getUsdAmount(),
+                payment.getStatus().name(),
+                payment.getSettlementStatus().name(),
+                payment.getErrorCode(),
+                payment.getCreatedAt(),
+                payment.getUpdatedAt());
     }
 }
+
