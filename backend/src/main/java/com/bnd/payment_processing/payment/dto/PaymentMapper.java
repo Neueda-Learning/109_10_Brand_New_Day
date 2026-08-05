@@ -26,6 +26,11 @@ public final class PaymentMapper {
         response.setErrorCode(payment.getErrorCode());
         response.setType(payment.getType());
         response.setOriginalPaymentId(payment.getOriginalPaymentId());
+        response.setPaymentMethod(payment.getPaymentMethod());
+        response.setApprovalStatus(payment.getApprovalStatus());
+        response.setApprovedBy(payment.getApprovedBy());
+        response.setApprovedAt(payment.getApprovedAt());
+        response.setRejectionReason(payment.getRejectionReason());
         response.setCreatedAt(payment.getCreatedAt());
         response.setUpdatedAt(payment.getUpdatedAt());
         return response;
