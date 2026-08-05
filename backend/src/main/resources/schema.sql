@@ -14,6 +14,14 @@ CREATE TABLE payments (
     error_code          VARCHAR(64)     NULL,
     type                VARCHAR(10)     NOT NULL,
     original_payment_id CHAR(36)        NULL,
+    -- Added 2026-08-05 (spec.md Section 7, v2.2): extensible payment method tag.
+    payment_method      VARCHAR(20)     NOT NULL DEFAULT 'BANK_TRANSFER',
+    -- Added 2026-08-05 (spec.md Section 7/8.1 rule 6, v2.2): refund approval gate.
+    -- Always NULL for type = PAYMENT rows; only ever set on type = REFUND rows.
+    approval_status     VARCHAR(20)     NULL,
+    approved_by         VARCHAR(64)     NULL,
+    approved_at         TIMESTAMP       NULL,
+    rejection_reason    VARCHAR(255)    NULL,
     created_at          TIMESTAMP       NOT NULL,
     updated_at          TIMESTAMP       NOT NULL,
     CONSTRAINT fk_payments_original_payment

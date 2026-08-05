@@ -41,6 +41,12 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.CONFLICT, "INVALID_REFUND_STATE", ex.getMessage(), request);
     }
 
+    // Added 2026-08-05 (spec.md Section 8.1 rule 6 / Section 10.8-10.9, v2.2)
+    @ExceptionHandler(RefundNotApprovedException.class)
+    public ResponseEntity<ErrorResponse> handleRefundNotApproved(RefundNotApprovedException ex, WebRequest request) {
+        return buildError(HttpStatus.CONFLICT, "REFUND_NOT_APPROVED", ex.getMessage(), request);
+    }
+
     /**
      * Not a real error - a duplicate idempotency_key on POST /api/payments means
      * "return the original resource" (spec.md Section 10.7), so this bypasses the

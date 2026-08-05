@@ -112,4 +112,44 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
     }
+
+    // Added 2026-08-05 (spec.md Section 8.1 rule 6 / Section 10.8-10.9, v2.2)
+    @Test
+    void refundNotApproved_onProcess_returns409() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(paymentService.processTransition(eq(id), any()))
+                .thenThrow(new RefundNotApprovedException("refund is not yet approved"));
+
+        mockMvc.perform(post("/api/payments/{id}/process", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("REFUND_NOT_APPROVED"));
+    }
+
+    @Test
+    void refundNotApproved_onApprove_returns409() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(paymentService.approveRefund(eq(id), any()))
+                .thenThrow(new RefundNotApprovedException("refund already approved or rejected"));
+
+        mockMvc.perform(post("/api/payments/{id}/refund/approve", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"approvedBy\":\"business-user-1\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("REFUND_NOT_APPROVED"));
+    }
+
+    @Test
+    void refundNotApproved_onReject_returns409() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(paymentService.rejectRefund(eq(id), any()))
+                .thenThrow(new RefundNotApprovedException("refund already approved or rejected"));
+
+        mockMvc.perform(post("/api/payments/{id}/refund/reject", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rejectedBy\":\"business-user-2\",\"reason\":\"test\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("REFUND_NOT_APPROVED"));
+    }
 }
