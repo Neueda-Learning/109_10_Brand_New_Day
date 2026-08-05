@@ -1,8 +1,8 @@
 # Payment Processing System - Unified Specification & Progress Log
 
 Status: ACTIVE (living document — update it as work progresses)
-Version: 2.1
-Last Updated: 2026-08-04
+Version: 2.2
+Last Updated: 2026-08-05
 Source of Truth: This file only.
 
 ## 1. How to Use This Spec
@@ -43,6 +43,12 @@ agent) to see current project state at a glance.
 Status values: `NOT_STARTED`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
 Overall project phase: **Phase 2 (Backend/Frontend Impl) — DONE for M1-M4 on their respective branches. Phase 3 (cross-module integration validation, e.g. end-to-end refund/process/query flows together, PR review, merge of `feature/m4-lifecycle-ui` into `main`) is IN_PROGRESS.**
 
+**v2.2 scope (added 2026-08-05):** payment method, refund approval workflow, insights
+endpoint, and the unified business frontend (Sections 4/5/7/8.1/9/10/14/16) are
+**spec-approved but implementation NOT_STARTED** — tracked via the new
+`feature/m3-refund-approval`/`feature/shared-dataset-v2`/`feature/m4-insights-api`/
+`feature/m4-business-ui` branches (Section 16).
+
 ## 3. Session Context Block (Optional — for AI session hygiene)
 
 Copy and fill this block at the top of a new chat when working on a specific module:
@@ -64,6 +70,11 @@ Copy and fill this block at the top of a new chat when working on a specific mod
 - No logging of full account/card numbers; use masking.
 - Frontend only plain HTML/CSS/JS.
 - No frontend frameworks or build tools.
+- Exception (added 2026-08-05): Bootstrap 5 (CSS + `bundle.js`) and Bootstrap Icons,
+  loaded only via CDN `<link>`/`<script>` tags, are explicitly whitelisted. No `npm
+  install`, no bundler, no build step of any kind — this is the only permitted
+  framework/library exception, and no other UI library may be added without a further
+  spec amendment.
 - No unnecessary dependencies.
 - No endpoint, field, or workflow outside this spec.
 
@@ -75,7 +86,14 @@ Internal payment processing system with:
 - Audit history
 - Idempotency behavior
 - Refund creation flow
+- Refund approval workflow (business must approve/reject a refund before it can be
+  processed to completion — added 2026-08-05, see Section 8.1 rule 6 and Section 9's
+  updated M3 section)
+- Payment method tagging (extensible field, single supported value `BANK_TRANSFER` for
+  now — added 2026-08-05, see Section 7 and Section 9's updated M3 section)
 - Query/list APIs
+- Analytics/insights aggregate endpoint for the business dashboard (added 2026-08-05,
+  see Section 9's updated M4 section and Section 10.10)
 - Shared lifecycle UI structure
 
 Out of scope:
@@ -139,6 +157,11 @@ payments (
   error_code          VARCHAR NULL,
   type                VARCHAR,     -- PAYMENT | REFUND
   original_payment_id UUID NULL,   -- set when type = REFUND
+  payment_method      VARCHAR(20) NOT NULL DEFAULT 'BANK_TRANSFER',  -- added 2026-08-05
+  approval_status     VARCHAR(20) NULL,  -- NULL | PENDING_APPROVAL | APPROVED | REJECTED, REFUND rows only (added 2026-08-05)
+  approved_by         VARCHAR(64) NULL,  -- added 2026-08-05
+  approved_at         TIMESTAMP NULL,    -- added 2026-08-05
+  rejection_reason    VARCHAR(255) NULL, -- added 2026-08-05
   created_at          TIMESTAMP,
   updated_at          TIMESTAMP
 )
@@ -172,6 +195,13 @@ Schema invariants:
   supply `idempotencyKey` as their own correlation value.
 - All `TIMESTAMP` columns are stored and returned in **UTC**. Frontend pages are
   responsible for any local-time display conversion; the API never converts timezones.
+- `payment_method` (added 2026-08-05): a single supported value today, `BANK_TRANSFER`;
+  the column exists so future methods (e.g. `CARD`/`UPI`/`WALLET`) can be added later
+  without a schema change. No per-method validation/behavior branching exists yet.
+- `approval_status`/`approved_by`/`approved_at`/`rejection_reason` (added 2026-08-05):
+  only ever set on `type = REFUND` rows. Stays `NULL` for `type = PAYMENT` rows. Set to
+  `PENDING_APPROVAL` at refund creation time; see Section 8.1 rule 6 for the full
+  approval-gate rule and Section 9 (M3) for the owning endpoints.
 
 ## 8. State and Transition Rules
 
@@ -247,6 +277,19 @@ This is the complete, unambiguous definition of how a refund works end to end:
 5. Refunding a `REFUND` row itself (i.e. `original_payment_id` pointing at a payment
    where `type = REFUND`) is always rejected with `InvalidRefundStateException`,
    regardless of that refund row's own status.
+6. **Approval gate (added 2026-08-05):** every new refund row is created with
+   `approval_status = PENDING_APPROVAL`. A refund's status can **never** advance past
+   `CREATED` (i.e. `POST /api/payments/{refundId}/process` for `CREATED -> VALIDATED`)
+   until a business user explicitly approves it via
+   `POST /api/payments/{refundId}/refund/approve` (Section 10.8). Attempting to
+   `process` a refund that is not yet `APPROVED` fails with `RefundNotApprovedException`
+   (`409`, Section 10.7). Rejecting a refund via
+   `POST /api/payments/{refundId}/refund/reject` (Section 10.9) sets
+   `approval_status = REJECTED` and moves the refund's own `status` straight to
+   `FAILED` (with `error_code = 'REFUND_REJECTED'`) via the normal
+   `payment_status_history` mechanism — no new payment status was introduced for this;
+   it reuses the existing terminal `FAILED` state. Approval/rejection never applies to
+   `type = PAYMENT` rows.
 
 ### 8.2 Process Outcome Rule (What Decides `SENT -> COMPLETED` vs `SENT -> FAILED`)
 
@@ -424,16 +467,29 @@ timelines; audit UI renders a real payment's lifecycle.
 across the whole API, and let a completed payment be refunded.
 
 **Backend files owned:**
-- `payment/controller/PaymentController.java` — `POST /api/payments/{id}/refund`
-- `payment/service/PaymentService.java` / `PaymentServiceImpl.java` — `createRefund()`, idempotency lookup logic used inside `createPayment()`
-- `payment/dto/RefundRequest.java`, `ErrorResponse.java`
+- `payment/controller/PaymentController.java` — `POST /api/payments/{id}/refund`,
+  `POST /api/payments/{id}/refund/approve`, `POST /api/payments/{id}/refund/reject`
+  (approve/reject added 2026-08-05)
+- `payment/service/PaymentService.java` / `PaymentServiceImpl.java` — `createRefund()`,
+  `approveRefund()`, `rejectRefund()` (added 2026-08-05), idempotency lookup logic used
+  inside `createPayment()`. Recommended (not mandatory): split refund-specific logic into
+  a dedicated `payment/service/RefundService.java`/`RefundServiceImpl.java` to keep
+  `PaymentServiceImpl` from growing unbounded.
+- `payment/model/PaymentMethod.java` (new, added 2026-08-05) — enum, single value
+  `BANK_TRANSFER` today, designed to extend later without a shape change.
+- `payment/dto/RefundRequest.java` (gains optional `idempotencyKey`, added 2026-08-05),
+  `ErrorResponse.java`, new `ApproveRefundRequest.java`, `RejectRefundRequest.java`
+  (added 2026-08-05)
 - `common/exception/GlobalExceptionHandler.java`
-- `common/exception/PaymentNotFoundException.java`, `InvalidStatusTransitionException.java`, `DuplicatePaymentException.java`, `InvalidRefundStateException.java`
+- `common/exception/PaymentNotFoundException.java`, `InvalidStatusTransitionException.java`, `DuplicatePaymentException.java`, `InvalidRefundStateException.java`,
+  new `RefundNotApprovedException.java` (added 2026-08-05)
 
 **APIs owned:**
 | API | Method | Purpose |
 |---|---|---|
 | `/api/payments/{id}/refund` | POST | Create a refund (`type = REFUND`) against a `COMPLETED` payment. |
+| `/api/payments/{id}/refund/approve` | POST | Approve a `PENDING_APPROVAL` refund so it can proceed through `process` (added 2026-08-05). |
+| `/api/payments/{id}/refund/reject` | POST | Reject a `PENDING_APPROVAL` refund; moves it straight to `FAILED` (added 2026-08-05). |
 
 **In plain English:** the refund endpoint does not "undo" or delete the original
 payment — it creates a **brand-new payment row** of `type = REFUND` linked back to the
@@ -459,6 +515,20 @@ Also owns the **cross-cutting behavior** used by every other endpoint:
   `status = CREATED`, and its own history row `null -> CREATED`.
 - Refunding a non-`COMPLETED` payment, or a payment that is already `type = REFUND`,
   throws `InvalidRefundStateException`.
+- **Refund approval gate (added 2026-08-05):** a refund is created with
+  `approval_status = PENDING_APPROVAL` and cannot advance past `CREATED` via `process`
+  until approved — see Section 8.1 rule 6 for the full rule and Section 10.8/10.9 for
+  the endpoint contracts.
+- **Refund idempotency (added 2026-08-05):** `RefundRequest` accepts an optional
+  `idempotencyKey`, reusing the same globally-unique `idempotency_key` column and
+  duplicate-key-catch-and-refetch short-circuit pattern already used by
+  `createPayment()`, so a double-submitted "Confirm Refund" click cannot create two
+  refund rows.
+- **Concurrency fix (added 2026-08-05):** the cumulative refund-amount cap check
+  (Section 8.1 rule 4) must take a row lock (`SELECT ... FOR UPDATE`) on the original
+  payment before computing the existing refunded sum, inside the same `@Transactional`
+  method as the insert — closes a race window where two near-simultaneous refund
+  requests could both pass the cap check before either commits.
 - All exceptions map to a single consistent `ErrorResponse` JSON shape (Section 10)
   through `GlobalExceptionHandler` (`@ControllerAdvice`).
 
@@ -477,6 +547,15 @@ Also owns the **cross-cutting behavior** used by every other endpoint:
 - [ ] Complete `GlobalExceptionHandler` mapping every custom exception to an `ErrorResponse`
       with the correct HTTP status code (Section 10.7).
 - [ ] Wire `detail.html` to show payment details and trigger a real refund call.
+- [ ] (Added 2026-08-05, branch `feature/m3-refund-approval`) Add the 5 new `payments`
+      columns to `schema.sql`; implement `PaymentMethod` enum + wiring through
+      `Payment`/`CreatePaymentRequest`/`PaymentResponse`/`PaymentMapper`.
+- [ ] (Added 2026-08-05) Implement `approveRefund()`/`rejectRefund()` + the
+      `refund/approve`/`refund/reject` endpoints and the `process()` approval guard.
+- [ ] (Added 2026-08-05) Add optional `idempotencyKey` to `RefundRequest` and the
+      matching short-circuit logic; add the `SELECT ... FOR UPDATE` concurrency fix.
+- [ ] (Added 2026-08-05) Add `RefundNotApprovedException` + `GlobalExceptionHandler`
+      mapping (409, `REFUND_NOT_APPROVED`).
 
 **Depends on:** M1's create flow (to inject idempotency check); M2's status field (to
 gate refund eligibility); M4 for shared design tokens on `detail.html`.
@@ -493,31 +572,57 @@ API returns the same `ErrorResponse` shape with an appropriate status code.
 by every other frontend page, and publish API documentation.
 
 **Backend files owned:**
-- `payment/controller/PaymentQueryController.java` — `GET /api/payments`
+- `payment/controller/PaymentQueryController.java` — `GET /api/payments`,
+  `GET /api/payments/insights` (added 2026-08-05)
 - `config/OpenApiConfig.java` — springdoc-openapi configuration
+- (Added 2026-08-05) `payment/dto/PaymentInsightsResponse.java`; recommended new
+  `payment/repository/PaymentAnalyticsRepository.java`/
+  `JdbcPaymentAnalyticsRepository.java` and `payment/service/PaymentAnalyticsService.java`/
+  `PaymentAnalyticsServiceImpl.java`, kept separate from the core payment lifecycle
+  service/repository.
 
 **APIs owned:**
 | API | Method | Purpose |
 |---|---|---|
-| `/api/payments` | GET | List/filter/search payments (by `status`, `type`, `sourceAccount`, `destinationAccount`, date range; paginated). |
+| `/api/payments` | GET | List/filter/search payments (by `status`, `type`, `sourceAccount`, `destinationAccount`, `paymentMethod`, `approvalStatus`, date range; paginated). |
+| `/api/payments/insights` | GET | Aggregate analytics for the business dashboard (added 2026-08-05, see Section 10.10). |
 
-**In plain English:** this is the "browse/search everything" endpoint used by the
-business dashboard — no id required, just optional filters, returned a page at a time,
-newest first by default.
+**In plain English:** `GET /api/payments` is the "browse/search everything" endpoint
+used by the business dashboard — no id required, just optional filters, returned a page
+at a time, newest first by default. `GET /api/payments/insights` (added 2026-08-05) is a
+read-only aggregate/summary endpoint (totals, breakdowns by status/type, success rate,
+pending-approval count) that powers the new business dashboard's KPI cards — it never
+returns individual payment rows.
 
 **Query parameters (all optional, combinable):**
-`status`, `type`, `sourceAccount`, `destinationAccount`, `fromDate`, `toDate`, `page`
-(default 0), `size` (default 20).
+`status`, `type`, `sourceAccount`, `destinationAccount`, `paymentMethod`,
+`approvalStatus` (`paymentMethod`/`approvalStatus` added 2026-08-05), `fromDate`,
+`toDate`, `page` (default 0), `size` (default 20).
+
+**Routing note (added 2026-08-05):** `GET /api/payments/insights` is a literal path
+segment, not a path variable, so it must not collide with `GET /api/payments/{id}` on
+`PaymentController` — add an explicit `MockMvc` test proving requests to `/insights`
+route to `PaymentQueryController`, not `PaymentController`'s `{id}` lookup (Section 15).
 
 **Frontend owned (shared design system + business dashboards):**
 - `frontend/frontend-shared/design-tokens.css` — shared colors, spacing, typography,
-  status-badge colors (one badge style per `PaymentStatus`), used by every page in both
-  `frontend-user` and `frontend-business`.
+  status-badge colors (one badge style per `PaymentStatus`, plus 3 new badge colors for
+  `PENDING_APPROVAL`/`APPROVED`/`REJECTED` added 2026-08-05), used by every page in both
+  `frontend-user` and `frontend-business`. See Section 14.2 for the full brand/theming
+  guidelines (light/dark mode, HSBC-style palette, icon rules — added 2026-08-05).
 - `frontend/frontend-shared/lifecycle-timeline.js` — reusable vanilla-JS component that
-  renders a `payment_status_history` array as a visual timeline. Consumed by M2's
-  `audit.html` and M1's `history.html`.
-- `frontend/frontend-business/dashboard.html` — business dashboard: filterable/searchable
-  payments list, calls `GET /api/payments`.
+  renders a `payment_status_history` array as a visual timeline, extended to also show
+  the refund approval sub-state (added 2026-08-05). Consumed by M2's `audit.html`/new
+  `ops.html` and M1's `history.html`.
+- `frontend/frontend-shared/app-mode.js` (new, added 2026-08-05) — shared Debug/Demo mode
+  toggle + `localStorage` persistence + request/response logging helper. See Section 14.3.
+- **(Added 2026-08-05) `frontend/frontend-business/ops.html`/`ops.js`/`ops.css`** — new
+  unified business dashboard **replacing** `dashboard.html`/`dashboard.js`/`audit.html`/
+  `audit.js` (old files deleted once `ops.*` covers their functionality). Single page:
+  KPI cards (from `/insights`) → filterable/searchable payments table (incl.
+  `paymentMethod`/`approvalStatus` filters) → detail panel with full history timeline →
+  refund Approve/Reject actions. Loads Bootstrap 5 + Bootstrap Icons via CDN (Section 4
+  exception). See Section 14.1 for the full layout plan.
 - `frontend/frontend-user/history.html` — user-facing simplified history view (reuses
   `lifecycle-timeline.js`).
 
@@ -533,6 +638,14 @@ newest first by default.
 - [ ] Finish `lifecycle-timeline.js` rendering logic and wire it into `audit.html` and `history.html`.
 - [ ] Finish `dashboard.html` list/filter UI consuming the real query API.
 - [ ] Finalize OpenAPI docs (`/swagger-ui.html` reachable, all endpoints documented).
+- [ ] (Added 2026-08-05, branch `feature/m4-insights-api`) Implement
+      `PaymentInsightsResponse` + analytics repository/service + `GET
+      /api/payments/insights`; extend `GET /api/payments` filters with `paymentMethod`/
+      `approvalStatus`; add the routing collision test noted above.
+- [ ] (Added 2026-08-05, branch `feature/m4-business-ui`) Build `ops.html`/`ops.js`/
+      `ops.css` replacing `dashboard.*`/`audit.*`; rework `design-tokens.css` per Section
+      14.2; build `app-mode.js` + the Debug/Demo toggle per Section 14.3; delete the old
+      4 files once `ops.*` fully covers their functionality.
 
 **Depends on:** All other modules' endpoints being stable enough to document; M1-M3's
 pages consuming the shared CSS/JS files without modification.
@@ -558,6 +671,9 @@ tested, independent of the rest of its module.
 | `/api/payments/{id}/history` | GET | M2 | Get full status history timeline | TESTED |
 | `/api/payments/{id}/process` | POST | M2 | Advance payment to next valid state | TESTED |
 | `/api/payments/{id}/refund` | POST | M3 | Create refund against a completed payment | TESTED |
+| `/api/payments/{id}/refund/approve` | POST | M3 | Approve a pending refund (added 2026-08-05) | NOT_IMPLEMENTED |
+| `/api/payments/{id}/refund/reject` | POST | M3 | Reject a pending refund (added 2026-08-05) | NOT_IMPLEMENTED |
+| `/api/payments/insights` | GET | M4 | Aggregate analytics for business dashboard (added 2026-08-05) | NOT_IMPLEMENTED |
 
 Endpoint status values: `NOT_IMPLEMENTED`, `IMPLEMENTED` (works, not yet tested),
 `TESTED` (has passing unit/repository tests per Section 15).
@@ -585,9 +701,13 @@ Request (`CreatePaymentRequest`):
   "destinationAccount": "ACC-2002",
   "amount": 250.00,
   "currency": "INR",
+  "paymentMethod": "BANK_TRANSFER",
   "idempotencyKey": "client-generated-uuid-or-key"
 }
 ```
+- `paymentMethod` (added 2026-08-05): optional; defaults server-side to
+  `"BANK_TRANSFER"` if omitted. `"BANK_TRANSFER"` is the only supported value today
+  (Section 7).
 
 Response `201 Created` (new payment) or `200 OK` (duplicate `idempotencyKey`) — `PaymentResponse`:
 ```json
@@ -602,10 +722,18 @@ Response `201 Created` (new payment) or `200 OK` (duplicate `idempotencyKey`) �
   "errorCode": null,
   "type": "PAYMENT",
   "originalPaymentId": null,
+  "paymentMethod": "BANK_TRANSFER",
+  "approvalStatus": null,
+  "approvedBy": null,
+  "approvedAt": null,
+  "rejectionReason": null,
   "createdAt": "2026-08-04T10:00:00Z",
   "updatedAt": "2026-08-04T10:00:00Z"
 }
 ```
+- `approvalStatus`/`approvedBy`/`approvedAt`/`rejectionReason` (added 2026-08-05): always
+  `null` for `type = PAYMENT` rows; only meaningful for `type = REFUND` rows
+  (Section 8.1 rule 6, Section 10.6/10.8/10.9).
 
 ### 10.2 `GET /api/payments/{id}`
 
@@ -620,11 +748,13 @@ Response `200 OK` — `PaymentResponse` (same shape as 10.1). `404` if not found
 **What it does (plain English):** the "browse/search everything" endpoint. All filters
 are optional and combine with AND logic; results are always paginated.
 
-Query params: `status`, `type`, `sourceAccount`, `destinationAccount`, `fromDate`,
+Query params: `status`, `type`, `sourceAccount`, `destinationAccount`, `paymentMethod`,
+`approvalStatus` (`paymentMethod`/`approvalStatus` added 2026-08-05), `fromDate`,
 `toDate`, `page` (default `0`), `size` (default `20`).
 
-- An unrecognized/invalid value for `status` or `type` (i.e. not one of the enum values)
-  returns `400 VALIDATION_ERROR` — never a `500`.
+- An unrecognized/invalid value for `status`, `type`, `paymentMethod`, or
+  `approvalStatus` (i.e. not one of the enum values) returns `400 VALIDATION_ERROR` —
+  never a `500` (`paymentMethod`/`approvalStatus` validation added 2026-08-05).
 - `page` must be `>= 0`; `size` must be between `1` and `100` inclusive. Values outside
   these bounds return `400 VALIDATION_ERROR` — never a `500` (added 2026-08-05).
 - Default sort order is `created_at DESC` (newest payments first) when no explicit
@@ -698,18 +828,26 @@ without `errorCode`.
 **What it does (plain English):** does **not** modify or delete the original payment.
 It creates a brand-new `type = REFUND` payment row linked to the original, which then
 has to be advanced through `process` calls like any other payment before it's actually
-`COMPLETED`. See Section 8.1 for the full step-by-step mechanism.
+`COMPLETED`. See Section 8.1 for the full step-by-step mechanism. **Added 2026-08-05:**
+the new refund starts at `approvalStatus = "PENDING_APPROVAL"` and cannot be advanced via
+`process` until a business user approves it (Section 10.8).
 
 Request (`RefundRequest`):
 ```json
 {
   "amount": 100.00,
-  "reason": "customer requested"
+  "reason": "customer requested",
+  "idempotencyKey": "client-generated-uuid-or-key"
 }
 ```
+- `idempotencyKey` (added 2026-08-05): optional. If provided and it already exists on a
+  prior refund attempt, the endpoint short-circuits to `200 OK` with the existing refund
+  resource instead of creating a duplicate row, mirroring `POST /api/payments`' behavior
+  (Section 8.3). If omitted, the server falls back to its own synthetic key.
 
-Response `201 Created` — new refund `PaymentResponse` (`type: "REFUND"`,
-`originalPaymentId` set, `status: "CREATED"`). `409` (`InvalidRefundStateException`) if:
+Response `201 Created` (new refund) or `200 OK` (duplicate `idempotencyKey`) — refund
+`PaymentResponse` (`type: "REFUND"`, `originalPaymentId` set, `status: "CREATED"`,
+`approvalStatus: "PENDING_APPROVAL"`). `409` (`InvalidRefundStateException`) if:
 - the original payment is not `COMPLETED`, or is itself `type = REFUND`; or
 - `amount <= 0`; or
 - `(sum of existing refunds against this original) + amount` exceeds the original
@@ -733,7 +871,83 @@ Response `201 Created` — new refund `PaymentResponse` (`type: "REFUND"`,
 | `InvalidStatusTransitionException` | 409 | `INVALID_STATUS_TRANSITION` |
 | `DuplicatePaymentException` | 200 (short-circuit, not an error) | — |
 | `InvalidRefundStateException` | 409 | `INVALID_REFUND_STATE` |
+| `RefundNotApprovedException` (added 2026-08-05) | 409 | `REFUND_NOT_APPROVED` |
 | Validation failure (Bean Validation, incl. bad query params / missing `errorCode`) | 400 | `VALIDATION_ERROR` |
+
+### 10.8 `POST /api/payments/{id}/refund/approve` (added 2026-08-05)
+
+**What it does (plain English):** a business user signs off on a pending refund so it
+can actually proceed through its lifecycle. Does not change the refund's `status`
+(still `CREATED` afterward) — only unblocks it so `process` calls will succeed.
+
+Request (`ApproveRefundRequest`):
+```json
+{
+  "approvedBy": "ops-user-1",
+  "note": "verified against original transaction"
+}
+```
+- `approvedBy`: required, non-blank.
+- `note`: optional.
+
+Response `200 OK` — updated refund `PaymentResponse` (`approvalStatus: "APPROVED"`,
+`approvedBy`/`approvedAt` set). `409` (`RefundNotApprovedException` or
+`InvalidRefundStateException`) if the target is not a `type = REFUND` row currently
+`approvalStatus = "PENDING_APPROVAL"` (e.g. already approved/rejected — conditional
+update affecting 0 rows). `404` if the id does not exist.
+
+### 10.9 `POST /api/payments/{id}/refund/reject` (added 2026-08-05)
+
+**What it does (plain English):** a business user declines a pending refund. The
+refund's own `status` moves straight to `FAILED` (it never proceeds further) with a
+recorded reason — the original payment is untouched either way.
+
+Request (`RejectRefundRequest`):
+```json
+{
+  "rejectedBy": "ops-user-1",
+  "reason": "duplicate refund request"
+}
+```
+- `rejectedBy`: required, non-blank.
+- `reason`: required, non-blank.
+
+Response `200 OK` — updated refund `PaymentResponse` (`approvalStatus: "REJECTED"`,
+`rejectionReason` set, `status: "FAILED"`, `errorCode: "REFUND_REJECTED"`); appends one
+`payment_status_history` row (`CREATED -> FAILED`, `triggeredBy` = `rejectedBy`). `409`
+if the target is not a `type = REFUND` row currently `approvalStatus =
+"PENDING_APPROVAL"`. `404` if the id does not exist.
+
+### 10.10 `GET /api/payments/insights` (added 2026-08-05)
+
+**What it does (plain English):** a read-only aggregate/summary endpoint for the
+business dashboard's KPI cards — never returns individual payment rows, only counts/
+sums/rates. Accepts the same optional `fromDate`/`toDate` (and optionally `status`/
+`type`) filters as `GET /api/payments`.
+
+Response `200 OK` — `PaymentInsightsResponse`:
+```json
+{
+  "totalCount": 491,
+  "totalAmount": 18234567.50,
+  "countByStatus": { "CREATED": 40, "VALIDATED": 35, "SENT": 30, "COMPLETED": 320, "FAILED": 66 },
+  "countByType": { "PAYMENT": 440, "REFUND": 51 },
+  "amountByType": { "PAYMENT": 17000000.00, "REFUND": 1234567.50 },
+  "successRate": 0.83,
+  "refundRate": 0.07,
+  "pendingApprovalCount": 6,
+  "dailyVolume": [
+    { "date": "2026-08-01", "count": 12, "amount": 45000.00 }
+  ]
+}
+```
+- `successRate`: `COMPLETED / (COMPLETED + FAILED)` among terminal `type = PAYMENT` rows.
+- `refundRate`: total `REFUND` amount / total `PAYMENT` amount.
+- `pendingApprovalCount`: count of `type = REFUND` rows with
+  `approvalStatus = "PENDING_APPROVAL"`.
+- **Routing note:** this is a literal path segment and must not collide with
+  `GET /api/payments/{id}` — see Section 9 (M4)'s routing note and Section 15's required
+  test.
 
 ## 11. Phase 1 — Backbone Setup (Now)
 
@@ -823,6 +1037,12 @@ Frontend conventions:
 - Each `frontend-user`/`frontend-business` page has its own small dedicated JS file
   (e.g. `index.js` next to `index.html`) for page-specific logic (form submission,
   fetch calls) — keep page logic out of the shared files.
+
+**Planned v2.2 change (added 2026-08-05):** `frontend-business/dashboard.html`/
+`dashboard.js`/`audit.html`/`audit.js` above will be replaced by a single
+`ops.html`/`ops.js`/`ops.css`, and a new `frontend-shared/app-mode.js` will be added —
+see Section 14.1/14.3 for the full plan. This tree reflects the current, already-built
+Phase 1 state; it will be updated again once that migration lands.
 
 ### 11.3 Shared Setup Tasks
 
@@ -953,14 +1173,97 @@ Two static, framework-free apps plus a shared layer — see Section 11.2 for the
 
 - **`frontend-user/`** — the end-customer app: create a payment (`index.html`), view a
   simplified history (`history.html`), view details and trigger a refund (`detail.html`).
-- **`frontend-business/`** — the internal/business-operator app: searchable payments
-  dashboard (`dashboard.html`), full audit trail viewer (`audit.html`).
+  Owned/built by you personally; not part of M1-M4 execution scope going forward.
+- **`frontend-business/`** — the internal/business-operator app. **Current state:**
+  searchable payments dashboard (`dashboard.html`), full audit trail viewer
+  (`audit.html`). **Planned (added 2026-08-05, see 14.1):** replaced by a single unified
+  `ops.html`/`ops.js`/`ops.css` page.
 - **`frontend-shared/`** — design tokens (`design-tokens.css`) and the reusable
-  `lifecycle-timeline.js` component, consumed by both apps. No page-specific logic
-  belongs here.
+  `lifecycle-timeline.js` component, consumed by both apps, plus the new (added
+  2026-08-05) `app-mode.js` (Section 14.3). No page-specific logic belongs here.
 
 Modularity rule: page-specific JS lives next to its HTML file (e.g. `dashboard.js` beside
 `dashboard.html`); anything reused across 2+ pages moves into `frontend-shared/`.
+
+### 14.1 Unified Business Frontend (added 2026-08-05)
+
+`dashboard.html`/`dashboard.js`/`audit.html`/`audit.js` are replaced by one page,
+`frontend/frontend-business/ops.html` (+ `ops.js`/`ops.css`), owned by M4:
+
+1. **KPI section** — cards fed by `GET /api/payments/insights` (Section 10.10): total
+   volume, success rate, refund rate, pending-approval count.
+2. **Search/filter table** — carries over the existing `dashboard.js` filter/search
+   logic (Section 9 M4), extended with `paymentMethod`/`approvalStatus` filters.
+3. **Detail panel** — selecting a row shows its full history timeline (carries over
+   `audit.js`/`lifecycle-timeline.js` rendering), plus `paymentMethod`/`approvalStatus`
+   fields.
+4. **Refund approval actions** — `Approve`/`Reject` buttons, shown only when
+   `type = "REFUND" && approvalStatus = "PENDING_APPROVAL"`, calling Section 10.8/10.9.
+5. Loaded via Bootstrap 5 + Bootstrap Icons CDN `<link>`/`<script>` tags (Section 4
+   exception) plus the shared `design-tokens.css`/`lifecycle-timeline.js`/`app-mode.js`.
+
+### 14.2 Brand & Theming Guidelines (added 2026-08-05)
+
+Applies to `frontend-shared/design-tokens.css`; consumed by `ops.html` now, available
+for `frontend-user` pages too.
+
+**Theme:** light mode is the default and always the initial theme on first load. Dark
+mode is optional and user-toggled (a switch in the page header), persisted via
+`localStorage` (`theme=light|dark`) — not auto-detected from OS preference. Implemented
+via a `[data-theme="dark"]` attribute on `<html>` overriding the existing CSS custom
+properties in `design-tokens.css` — no separate stylesheet.
+
+**Color palette (HSBC-inspired, not a trademark copy):**
+- Primary: `#DB0011` (buttons, active nav, key CTAs) — used sparingly as an accent, never
+  as a full-page wash.
+- Neutrals: near-black text `#1A1A1A`, white surfaces `#FFFFFF` (light mode), dark
+  surfaces `#121212`/`#1E1E1E` (dark mode), mid-greys `#5A6472`/`#8C93A6` for secondary
+  text/borders.
+- Status badges: keep the existing 5 `PaymentStatus` colors, add 3 new ones for
+  `PENDING_APPROVAL` (amber), `APPROVED` (green, distinct from `COMPLETED`), `REJECTED`
+  (red, distinct from `FAILED`).
+- No saturated rainbow palettes, neon gradients, or glow/drop-shadow effects — flat,
+  restrained, banking-app aesthetic.
+
+**Typography:** keep the existing system font stack (`system-ui, -apple-system,
+"Segoe UI", Roboto, sans-serif`) — no webfont import (Section 6.3, avoids FOUC).
+
+**Icons (explicitly avoid an "AI-generated" look):**
+- One consistent icon set only — Bootstrap Icons via CDN — never mix icon libraries or
+  use emoji/hand-drawn icons.
+- Monochrome via `currentColor`, consistent sizing (`1em`/`1.25em`), no multi-color/
+  gradient/3D icons.
+- No decorative filler icons — every icon maps to a real state (payment status,
+  approval status, action button) from one fixed lookup table in `ops.js`.
+- Flat cards, 1px borders, restrained shadow (existing `--shadow-card` token), consistent
+  spacing scale (existing `--space-1..6`) — avoid busy layouts or excessive rounded
+  corners/gradients.
+
+**Animation:** subtle only — 150-250ms ease-in-out transitions for hover/focus/status
+changes; timeline step reveal via fade+slide-up; progress-bar fill via `width`/`transform`
+transition. No bounce/elastic easing, no long spinners, no celebratory animations.
+
+### 14.3 Debug / Demo Mode Toggle (added 2026-08-05)
+
+A page-header toggle (`Demo` / `Debug`), persisted via `localStorage` (`mode=demo|debug`,
+default `demo`), implemented once in shared `frontend-shared/app-mode.js` so both
+`ops.js` and any `frontend-user` page can reuse the same toggle/logging logic. **Requires
+no backend changes** — both modes call the exact same endpoints in Section 10; only the
+frontend orchestration/presentation differs.
+
+- **Demo mode (default):** after creating a payment/refund, the UI auto-advances it
+  end-to-end (`CREATED -> VALIDATED -> SENT -> COMPLETED`/`FAILED`) via repeated calls to
+  the existing manual `POST .../process` endpoint with a short client-side delay
+  (~600-900ms) between steps and an animated timeline reveal. This is purely a
+  client-side convenience loop over the existing manual endpoint — it does **not** add a
+  backend auto-advance/background job, preserving Section 8's "no automatic retry / no
+  background job" rule. Refunds still stop at the approval gate in Demo mode (Section
+  8.1 rule 6) — auto-advance resumes only after a human approves.
+- **Debug mode:** every action shows a collapsible inspector panel with the exact
+  outgoing request (method, URL, JSON body) and raw JSON response, and replaces
+  auto-advance with explicit "Advance to VALIDATED"/"Advance to SENT"/"Mark
+  COMPLETED"/"Mark FAILED" buttons — one click per transition, and surfaces the
+  `ErrorResponse` shape (Section 10.7) verbatim on failures.
 
 ## 15. Testing Baseline
 
@@ -969,6 +1272,16 @@ Required:
 - Negative path tests for invalid state transitions, invalid refund states, and
   idempotency conflicts.
 - Repository tests for JDBC SQL behavior.
+- (Added 2026-08-05) Refund approval/rejection tests: `process()` rejects a
+  non-`APPROVED` refund with `RefundNotApprovedException`; approve/reject conditional
+  updates return 0 rows (and error) when already approved/rejected.
+- (Added 2026-08-05) Concurrency test proving the `SELECT ... FOR UPDATE` lock in
+  `createRefund()` prevents two near-simultaneous refunds from summing over the
+  original payment's amount.
+- (Added 2026-08-05) Refund idempotency test: two identical `RefundRequest`s with the
+  same `idempotencyKey` return the same refund row.
+- (Added 2026-08-05) `MockMvc` routing test proving `GET /api/payments/insights` is not
+  misrouted to `GET /api/payments/{id}`.
 
 Environment prerequisite:
 - MySQL must be available locally for integration tests.
@@ -981,6 +1294,18 @@ Branch naming:
 - `feature/m2-status-engine`
 - `feature/m3-refunds`
 - `feature/m4-lifecycle-ui`
+- (Added 2026-08-05) `feature/m3-refund-approval` — payment method + refund approval +
+  refund idempotency + concurrency fix (Section 9 M3, Section 8.1 rule 6).
+- (Added 2026-08-05) `feature/shared-dataset-v2` — team-owned `data.sql` regeneration for
+  the new columns (Section 11.5).
+- (Added 2026-08-05) `feature/m4-insights-api` — analytics endpoint + extended search
+  filters (Section 9 M4, Section 10.10).
+- (Added 2026-08-05) `feature/m4-business-ui` — unified `ops.html` + brand rework +
+  Debug/Demo toggle (Section 14.1/14.2/14.3).
+
+Recommended merge order for the 2026-08-05 additions (each depends on the schema from
+the first): `feature/m3-refund-approval` -> `feature/shared-dataset-v2` ->
+`feature/m4-insights-api` -> `feature/m4-business-ui`.
 
 PR policy:
 - Small PRs only.
@@ -1006,6 +1331,7 @@ history — keep entries short and factual.
 | 2026-08-04 | Migrated backend to Spring Boot 4.1.0 (from 3.4.1) — confirmed `4.1.0` is the current latest stable `spring-boot-starter-parent` release. Bumped `springdoc-openapi-starter-webmvc-ui` from `2.6.0` to `3.1.0` (the springdoc line compatible with Spring Boot 4 / Jakarta EE 11, per springdoc's own compatibility matrix — the old `2.x` line targets Spring Boot 3 and is incompatible). All other whitelisted dependencies (`spring-boot-starter-web`/`jdbc`/`validation`, `mysql-connector-j`, `spring-boot-starter-test`) are version-managed by the parent BOM and needed no explicit changes; existing code already used `jakarta.validation.*` imports so no source changes were required. Re-verified with `mvn compile` — builds cleanly. Section 6.1 updated to reflect Spring Boot 4.x as the required major version. |
 | 2026-08-04 | M3 (Idempotency, Errors, Refund) implemented: `PaymentServiceImpl.createRefund()` (account swap, cumulative refund-amount cap, refund-of-refund ban, non-`COMPLETED` rejection), idempotent `createPayment()` duplicate-key short-circuit, `JdbcPaymentRepository.sumRefundedAmount()`, full `GlobalExceptionHandler` implementation (404/409/400/500 incl. the 200-with-existing-payment duplicate short-circuit), and `detail.html`/`detail.js` refund UI. Added test-scope dependency `org.springframework.boot:spring-boot-webmvc-test` (Section 6.2) — required because Spring Boot 4.1.0 relocated `@WebMvcTest`/`@AutoConfigureMockMvc` out of `spring-boot-test-autoconfigure`; not part of the original whitelist but needed for `GlobalExceptionHandlerTest`. 16 unit/MockMvc tests passing (`PaymentServiceImplTest`, `GlobalExceptionHandlerTest`); `JdbcPaymentRepositoryTest` written, pending a live MySQL run. |
 | 2026-08-04 | M1/M2/M3 merged to `main` via PR #1/#3/#2 respectively. `main` briefly had a broken build after PR #3's stash-pop conflict resolution left literal `<<<<<<<`/`=======`/`>>>>>>>` markers in `JdbcPaymentRepository`/`JdbcPaymentStatusHistoryRepository`/`PaymentServiceImpl` plus a stale local `toResponse()` call; fixed on `main` by PR #4 (`hotfix/main-compile-fix`, commit `b0c5129`). M4 (`feature/m4-lifecycle-ui`) implemented `GET /api/payments` search/filter/pagination end-to-end (`JdbcPaymentRepository.search`/`countSearch`, `PaymentServiceImpl.searchPayments` with enum validation), `lifecycle-timeline.js`, `dashboard.html`/`dashboard.js`, `history.html`/`history.js`, plus unit tests for search/pagination/filtering/validation — but this branch had not yet merged `main`'s PR #4 hotfix. Merged `origin/main` into `feature/m4-lifecycle-ui`: one trivial import-only conflict in `JdbcPaymentRepository.java` (this branch's full search implementation vs. main's stub), resolved by keeping this branch's imports. Re-verified after merge: `mvn compile` succeeds, all 29 tests pass (`GlobalExceptionHandlerTest`, `JdbcPaymentRepositoryTest`, `PaymentServiceImplTest`). Corrected Section 2 dashboard above, which had been stale (still showing Phase 2 as `NOT_STARTED` for all modules despite merged, implemented, tested work) — spec updates had lagged actual progress. Remaining work: merge `feature/m4-lifecycle-ui` into `main` via PR, then Phase 3 end-to-end integration validation across all endpoints together. |
+| 2026-08-05 | v2.2: recorded the payment-method/refund-approval/insights/unified-business-frontend plan (Sections 4, 5, 7, 8.1 rule 6, 9 [M3/M4], 10.7-10.10, 11.2, 14.1-14.3, 15, 16) — **spec-only, no code changes yet**. Adds: `payment_method`/`approval_status`/`approved_by`/`approved_at`/`rejection_reason` columns; a refund approval gate (`POST /refund/approve`, `POST /refund/reject`, `RefundNotApprovedException`/`REFUND_NOT_APPROVED`); optional `idempotencyKey` on `RefundRequest` (reusing the existing idempotency short-circuit pattern); a documented concurrency fix for `createRefund()` (`SELECT ... FOR UPDATE` before the cumulative-amount check); a new `GET /api/payments/insights` analytics endpoint plus `paymentMethod`/`approvalStatus` search filters; a Bootstrap 5 + Bootstrap Icons CDN-only frontend exception (Section 4); a unified `ops.html`/`ops.js`/`ops.css` business frontend plan replacing `dashboard.html`/`audit.html`; HSBC-style light-default/dark-optional brand guidelines (Section 14.2); and a Debug/Demo mode toggle plan (`app-mode.js`, frontend-only, no backend change, Section 14.3). New branches recorded in Section 16: `feature/m3-refund-approval`, `feature/shared-dataset-v2`, `feature/m4-insights-api`, `feature/m4-business-ui`, with a recommended merge order. Section 2 dashboard annotated to show this scope as spec-approved/`NOT_STARTED`. Nothing in this entry has been implemented in code yet. |
 
 ## 19. Immediate Execution Checklist
 
@@ -1025,4 +1351,15 @@ Implementation checklist for next phase:
 - [x] M3 build (idempotency/refund/errors) — merged to `main` (PR #2).
 - [x] M4 build (query/list, shared UI, API docs) — implemented and tested on `feature/m4-lifecycle-ui`; merge into `main` still pending (open a PR).
 - [ ] Integration validation across all endpoints (Phase 3, in progress).
+
+v2.2 checklist (added 2026-08-05, spec-approved, implementation not started):
+- [ ] `feature/m3-refund-approval` — schema columns, `PaymentMethod` enum, refund
+      approval gate, refund idempotency, `SELECT ... FOR UPDATE` concurrency fix
+      (Section 9 M3, Section 8.1 rule 6, Section 10.8/10.9).
+- [ ] `feature/shared-dataset-v2` — regenerate `data.sql` with the 5 new columns
+      (Section 11.5).
+- [ ] `feature/m4-insights-api` — `GET /api/payments/insights` + extended search filters
+      (Section 9 M4, Section 10.10).
+- [ ] `feature/m4-business-ui` — unified `ops.html`/`ops.js`/`ops.css`, brand/theme
+      rework, Debug/Demo toggle (Section 14.1/14.2/14.3).
 
