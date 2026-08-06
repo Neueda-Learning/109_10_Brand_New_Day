@@ -47,6 +47,27 @@
     FAILED: "Payment could not be completed."
   };
 
+  // Plain-English reason shown for each errorCode a FAILED payment/refund can carry
+  // (added 2026-08-06): a wrong account number, a declined card, or insufficient
+  // funds are never blocked at checkout anymore - they're always created and only
+  // ever fail here, during the normal lifecycle, with a proper status + reason.
+  var ERROR_CODE_COPY = {
+    ACCOUNT_NOT_FOUND: "One of the account numbers on this payment doesn't exist.",
+    ACCOUNT_BLOCKED: "One of the accounts on this payment is blocked or closed.",
+    CARD_NOT_FOUND: "The selected card could not be found.",
+    CARD_DECLINED: "The card was declined (check the CVV, expiry, or card status).",
+    INSUFFICIENT_FUNDS: "The source account doesn't have enough funds to cover this payment.",
+    UNSUPPORTED_CURRENCY: "That currency isn't supported.",
+    REFUND_REJECTED: "This refund was rejected by the bank."
+  };
+
+  function describeErrorCode(errorCode) {
+    if (!errorCode) {
+      return null;
+    }
+    return ERROR_CODE_COPY[errorCode] || ("Reason: " + errorCode);
+  }
+
   // app-mode.js doesn't expose a fetchJson helper - wrap fetch() locally instead.
   async function fetchJson(url, method, body) {
     var options = { method: method || "GET" };
@@ -85,9 +106,10 @@
       });
     });
 
-    // Search and filter event listeners - only apply filters when user interacts
+    // Search/filter/sort event listeners - only apply when user interacts
     var searchInput = document.getElementById("search-uuid");
     var filterSelect = document.getElementById("filter-status");
+    var sortSelect = document.getElementById("sort-transactions");
 
     if (searchInput) {
       searchInput.addEventListener("input", function () {
@@ -96,6 +118,11 @@
     }
     if (filterSelect) {
       filterSelect.addEventListener("change", function () {
+        displayVisibleTransactions();
+      });
+    }
+    if (sortSelect) {
+      sortSelect.addEventListener("change", function () {
         displayVisibleTransactions();
       });
     }
@@ -216,7 +243,7 @@
       } else if (updated.status === "FAILED") {
         spinnerEl.classList.add("processing-spinner-failed");
         titleEl.textContent = "Payment failed";
-        subtitleEl.textContent = updated.errorCode ? "Reason: " + updated.errorCode : STAGE_COPY.FAILED;
+        subtitleEl.textContent = describeErrorCode(updated.errorCode) || STAGE_COPY.FAILED;
         doneBtn.hidden = false;
       }
     }
@@ -363,14 +390,43 @@
   function getFilteredPayments() {
     var searchInput = document.getElementById("search-uuid");
     var filterSelect = document.getElementById("filter-status");
+    var sortSelect = document.getElementById("sort-transactions");
     var searchValue = (searchInput && searchInput.value) ? searchInput.value.trim().toLowerCase() : "";
     var filterStatus = (filterSelect && filterSelect.value) ? filterSelect.value : "";
+    var sortValue = (sortSelect && sortSelect.value) ? sortSelect.value : "newest";
 
-    return allMyPayments.filter(function (payment) {
+    var filtered = allMyPayments.filter(function (payment) {
+      // Search by Payment ID (added 2026-08-06 - was mislabeled "UUID"; still
+      // matches the id field itself, just clearer wording for the customer).
       var matchesSearch = !searchValue || payment.id.toLowerCase().includes(searchValue);
       var matchesStatus = !filterStatus || payment.status === filterStatus;
       return matchesSearch && matchesStatus;
     });
+
+    return sortPayments(filtered, sortValue);
+  }
+
+  // Simple sort control (added 2026-08-06) - allMyPayments is already
+  // newest-first by default (see loadMyTransactions), so "newest"/"oldest" just
+  // reverse that; amount sorting compares each payment's own currency amount.
+  function sortPayments(payments, sortValue) {
+    var sorted = payments.slice();
+    switch (sortValue) {
+      case "oldest":
+        sorted.sort(function (a, b) { return new Date(a.createdAt) - new Date(b.createdAt); });
+        break;
+      case "amount-desc":
+        sorted.sort(function (a, b) { return Number(b.amount) - Number(a.amount); });
+        break;
+      case "amount-asc":
+        sorted.sort(function (a, b) { return Number(a.amount) - Number(b.amount); });
+        break;
+      case "newest":
+      default:
+        sorted.sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
+        break;
+    }
+    return sorted;
   }
 
   function displayVisibleTransactions() {
@@ -456,7 +512,7 @@
       (payment.paymentMethod === "CARD" && payment.cardLast4
         ? " (" + (payment.cardBrand || "") + " \u2022\u2022\u2022\u2022 " + payment.cardLast4 + ")"
         : "") + "<br>" +
-      (payment.errorCode ? "Error: " + payment.errorCode + "<br>" : "");
+      (payment.errorCode ? "Error: " + payment.errorCode + " - " + describeErrorCode(payment.errorCode) + "<br>" : "");
 
     var historyResult = await fetchJson(PAYMENTS_API + "/" + payment.id + "/history");
     var timelineContainer = detailEl.querySelector(".timeline-container");

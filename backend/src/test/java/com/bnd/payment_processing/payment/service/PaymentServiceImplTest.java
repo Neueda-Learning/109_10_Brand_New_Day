@@ -196,6 +196,88 @@ class PaymentServiceImplTest {
         verify(paymentStatusHistoryRepository, never()).insert(any());
     }
 
+    // --- Added 2026-08-06: account/card validation deferred from creation time to
+    // the CREATED -> VALIDATED lifecycle step - a payment must always be CREATED
+    // regardless of a wrong account number or a bad card, matching the same
+    // treatment as insufficient funds. ---
+
+    @Test
+    void createPayment_unknownSourceAccount_stillCreatesPaymentAtCreatedStatus() {
+        // createPayment() no longer looks up accounts at all (deferred to
+        // processTransition()) - this just proves an unknown account number
+        // doesn't block creation.
+        CreatePaymentRequest request = newCreateRequest();
+
+        PaymentResponse response = service.createPayment(request);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.CREATED);
+        verify(paymentRepository).insert(any(Payment.class));
+        verify(accountRepository, never()).findByAccountNumber(any());
+    }
+
+    @Test
+    void createPayment_blockedDestinationAccount_stillCreatesPaymentAtCreatedStatus() {
+        // Same as above - account status is irrelevant at creation time now.
+        CreatePaymentRequest request = newCreateRequest();
+
+        PaymentResponse response = service.createPayment(request);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.CREATED);
+        verify(paymentRepository).insert(any(Payment.class));
+        verify(accountRepository, never()).findByAccountNumber(any());
+    }
+
+    @Test
+    void createPayment_cardMethodWithWrongCvv_stillCreatesPaymentAtCreatedStatus_withPreFlaggedErrorCode() {
+        CreatePaymentRequest request = newCreateRequest();
+        request.setPaymentMethod("CARD");
+        request.setCardId(UUID.randomUUID().toString());
+        request.setCvv("000");
+
+        com.bnd.payment_processing.payment.model.Card card = new com.bnd.payment_processing.payment.model.Card();
+        card.setId(UUID.fromString(request.getCardId()));
+        card.setStatus(com.bnd.payment_processing.payment.model.CardStatus.ACTIVE);
+        card.setExpiryMonth(12);
+        card.setExpiryYear(LocalDate.now().getYear() + 5);
+        card.setLast4("4242");
+        card.setCardBrand("VISA");
+        when(cardRepository.findById(card.getId())).thenReturn(Optional.of(card));
+
+        PaymentResponse response = service.createPayment(request);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.CREATED);
+        verify(paymentRepository).insert(argThat(payment ->
+                payment.getStatus() == PaymentStatus.CREATED
+                        && "CARD_DECLINED".equals(payment.getErrorCode())));
+    }
+
+    @Test
+    void createPayment_cardMethodWithUnknownCardId_stillCreatesPaymentAtCreatedStatus() {
+        CreatePaymentRequest request = newCreateRequest();
+        request.setPaymentMethod("CARD");
+        request.setCardId(UUID.randomUUID().toString());
+        request.setCvv("123");
+        when(cardRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
+
+        PaymentResponse response = service.createPayment(request);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.CREATED);
+        verify(paymentRepository).insert(argThat(payment ->
+                payment.getStatus() == PaymentStatus.CREATED
+                        && "CARD_NOT_FOUND".equals(payment.getErrorCode())));
+    }
+
+    @Test
+    void createPayment_cardMethodMissingCardId_throwsIllegalArgumentException() {
+        CreatePaymentRequest request = newCreateRequest();
+        request.setPaymentMethod("CARD");
+
+        assertThatThrownBy(() -> service.createPayment(request))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verify(paymentRepository, never()).insert(any(Payment.class));
+    }
+
     @Test
     void getPayment_notFound_throwsPaymentNotFoundException() {
         UUID id = UUID.randomUUID();
@@ -234,6 +316,69 @@ class PaymentServiceImplTest {
                         && history.getToStatus() == PaymentStatus.VALIDATED
                         && "SYSTEM".equals(history.getTriggeredBy())
                         && history.getNote() == null));
+    }
+
+    // --- Added 2026-08-06: CREATED -> VALIDATED lifecycle guards (account
+    // existence/status, pre-flagged CARD decline) - the deferred counterpart to
+    // the createPayment() tests above; these degrade the transition to FAILED
+    // instead of throwing, mirroring the existing COMPLETED-step guards. ---
+
+    @Test
+    void processTransition_createdToValidated_unknownSourceAccount_degradesToFailedAccountNotFound() {
+        Payment current = paymentWithStatus(PaymentStatus.CREATED);
+        Payment updated = paymentWithStatus(PaymentStatus.FAILED);
+        updated.setId(current.getId());
+        updated.setErrorCode("ACCOUNT_NOT_FOUND");
+
+        when(accountRepository.findByAccountNumber("ACC-1001")).thenReturn(Optional.empty());
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current), Optional.of(updated));
+        when(paymentRepository.updateStatusIfCurrent(current.getId(), "CREATED", "FAILED", "ACCOUNT_NOT_FOUND")).thenReturn(1);
+
+        PaymentResponse response = service.processTransition(current.getId(), null);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(response.getErrorCode()).isEqualTo("ACCOUNT_NOT_FOUND");
+        verify(paymentRepository).updateStatusIfCurrent(current.getId(), "CREATED", "FAILED", "ACCOUNT_NOT_FOUND");
+    }
+
+    @Test
+    void processTransition_createdToValidated_blockedDestinationAccount_degradesToFailedAccountBlocked() {
+        Payment current = paymentWithStatus(PaymentStatus.CREATED);
+        Payment updated = paymentWithStatus(PaymentStatus.FAILED);
+        updated.setId(current.getId());
+        updated.setErrorCode("ACCOUNT_BLOCKED");
+
+        Account blocked = activeAccount("ACC-2002");
+        blocked.setStatus(AccountStatus.BLOCKED);
+        when(accountRepository.findByAccountNumber("ACC-2002")).thenReturn(Optional.of(blocked));
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current), Optional.of(updated));
+        when(paymentRepository.updateStatusIfCurrent(current.getId(), "CREATED", "FAILED", "ACCOUNT_BLOCKED")).thenReturn(1);
+
+        PaymentResponse response = service.processTransition(current.getId(), null);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(response.getErrorCode()).isEqualTo("ACCOUNT_BLOCKED");
+        verify(paymentRepository).updateStatusIfCurrent(current.getId(), "CREATED", "FAILED", "ACCOUNT_BLOCKED");
+    }
+
+    @Test
+    void processTransition_createdToValidated_preFlaggedCardDecline_degradesToFailedWithSameErrorCode() {
+        Payment current = paymentWithStatus(PaymentStatus.CREATED);
+        current.setErrorCode("CARD_DECLINED");
+        Payment updated = paymentWithStatus(PaymentStatus.FAILED);
+        updated.setId(current.getId());
+        updated.setErrorCode("CARD_DECLINED");
+
+        when(paymentRepository.findById(current.getId())).thenReturn(Optional.of(current), Optional.of(updated));
+        when(paymentRepository.updateStatusIfCurrent(current.getId(), "CREATED", "FAILED", "CARD_DECLINED")).thenReturn(1);
+
+        PaymentResponse response = service.processTransition(current.getId(), null);
+
+        assertThat(response.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(response.getErrorCode()).isEqualTo("CARD_DECLINED");
+        // The pre-flagged card error must take priority - no account lookup needed.
+        verify(accountRepository, never()).findByAccountNumber(any());
+        verify(paymentRepository).updateStatusIfCurrent(current.getId(), "CREATED", "FAILED", "CARD_DECLINED");
     }
 
     @Test

@@ -136,7 +136,7 @@
             type="text"
             class="form-control form-control-sm search-box"
             id="search-uuid"
-            placeholder="Search by UUID..."
+            placeholder="Search by Payment ID..."
             style="max-width: 200px;">
           <select class="form-select form-select-sm" id="filter-status" style="max-width: 150px;">
             <option value="">All Status</option>
@@ -145,6 +145,12 @@
             <option value="SENT">SENT</option>
             <option value="COMPLETED">COMPLETED</option>
             <option value="FAILED">FAILED</option>
+          </select>
+          <select class="form-select form-select-sm" id="sort-transactions" style="max-width: 170px;">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="amount-desc">Amount: High to Low</option>
+            <option value="amount-asc">Amount: Low to High</option>
           </select>
         </div>
       </div>
