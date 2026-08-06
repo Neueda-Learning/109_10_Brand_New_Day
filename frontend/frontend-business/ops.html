@@ -15,13 +15,6 @@
     <div class="container-fluid px-3 py-2 d-flex align-items-center justify-content-between">
       <span class="brand"><i class="bi bi-graph-up-arrow"></i> Operations Dashboard</span>
       <div class="d-flex align-items-center gap-3">
-        <div class="mode-toggle-group">
-          <span>Demo</span>
-          <div class="form-check form-switch m-0">
-            <input class="form-check-input" type="checkbox" role="switch" id="mode-toggle">
-          </div>
-          <span>Debug</span>
-        </div>
         <div class="form-check form-switch m-0">
           <input class="form-check-input" type="checkbox" role="switch" id="theme-toggle">
           <label class="form-check-label" for="theme-toggle"><i class="bi bi-moon-stars"></i></label>
@@ -30,7 +23,7 @@
     </div>
   </header>
 
-  <main class="container py-4">
+  <main class="container-fluid py-4">
     <!-- KPI cards (Section 14.1) - fed by GET /api/payments/insights. -->
     <section class="row row-cols-2 row-cols-md-5 g-3 mb-4" id="kpi-grid">
       <div class="col">
@@ -163,37 +156,42 @@
       </div>
     </section>
 
-    <!-- Detail panel -->
-    <section class="card mb-4" id="detail-card" hidden>
-      <h2 class="h5"><i class="bi bi-receipt"></i> Payment Detail</h2>
-      <div class="detail-fields small text-muted mb-2">
-        <p class="mb-1">ID: <span id="detail-id"></span></p>
-        <p class="mb-1">Source Account: <span id="detail-source"></span></p>
-        <p class="mb-1">Destination Account: <span id="detail-destination"></span></p>
-        <p class="mb-1">Amount: <span id="detail-amount"></span> <span id="detail-currency"></span></p>
-        <p class="mb-1">Status: <span id="detail-status" class="status-badge"></span></p>
-        <p class="mb-1">Type: <span id="detail-type"></span></p>
-      </div>
+    <!-- Detail modal -->
+    <div class="modal fade" id="detail-modal" tabindex="-1" aria-labelledby="detail-modal-label" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 class="h5 modal-title" id="detail-modal-label"><i class="bi bi-receipt"></i> Payment Detail</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="detail-fields small text-muted mb-2">
+              <p class="mb-1">ID: <span id="detail-id"></span></p>
+              <p class="mb-1">Source Account: <span id="detail-source"></span></p>
+              <p class="mb-1">Destination Account: <span id="detail-destination"></span></p>
+              <p class="mb-1">Amount: <span id="detail-amount"></span> <span id="detail-currency"></span></p>
+              <p class="mb-1">Status: <span id="detail-status" class="status-badge"></span></p>
+              <p class="mb-1">Type: <span id="detail-type"></span></p>
+            </div>
 
-      <div id="detail-approval-actions" class="row g-2 align-items-end mb-2" hidden>
-        <div class="col-auto">
-          <label for="approve-by" class="form-label small mb-0">Approved/Rejected by</label>
-          <input type="text" class="form-control form-control-sm" id="approve-by" placeholder="ops-user-1">
+            <div id="detail-approval-actions" class="row g-2 align-items-end mb-2" hidden>
+              <div class="col-auto">
+                <label for="approve-by" class="form-label small mb-0">Approved/Rejected by</label>
+                <input type="text" class="form-control form-control-sm" id="approve-by" placeholder="ops-user-1">
+              </div>
+              <div class="col-auto">
+                <button id="approve-btn" type="button" class="btn btn-outline-success btn-sm"><i class="bi bi-check-lg"></i> Approve</button>
+                <button id="reject-btn" type="button" class="btn btn-outline-danger btn-sm"><i class="bi bi-x-lg"></i> Reject</button>
+              </div>
+            </div>
+            <p id="approval-error" class="error-message" hidden></p>
+
+            <h3 class="h6"><i class="bi bi-clock-history"></i> Timeline</h3>
+            <div id="timeline"></div>
+          </div>
         </div>
-        <div class="col-auto">
-          <button id="approve-btn" type="button" class="btn btn-outline-success btn-sm"><i class="bi bi-check-lg"></i> Approve</button>
-          <button id="reject-btn" type="button" class="btn btn-outline-danger btn-sm"><i class="bi bi-x-lg"></i> Reject</button>
-        </div>
       </div>
-      <p id="approval-error" class="error-message" hidden></p>
-
-      <button id="demo-advance-btn" type="button" class="btn btn-outline-primary btn-sm mb-3" hidden><i class="bi bi-play-fill"></i> Auto-advance (demo)</button>
-
-      <h3 class="h6"><i class="bi bi-clock-history"></i> Timeline</h3>
-      <div id="timeline"></div>
-
-      <div id="debug-log-panel" class="debug-log-panel" hidden></div>
-    </section>
+    </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

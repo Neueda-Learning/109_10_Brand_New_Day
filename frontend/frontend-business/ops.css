@@ -19,12 +19,6 @@
   color: var(--color-primary);
 }
 
-.mode-toggle-group {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 .insight-card {
   margin-bottom: 0;
   padding: var(--space-3);
@@ -78,26 +72,19 @@
   text-align: right;
 }
 
-.debug-log-panel {
-  margin-top: var(--space-3);
-  max-height: 260px;
-  overflow-y: auto;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-2);
-  background: var(--color-bg);
+/* Keep the results table compact so all columns fit in view together
+   instead of wrapping cell text across several lines (spec.md Section 14.1). */
+#results-table {
+  font-size: 0.875rem;
 }
 
-.debug-log-entry {
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-1);
+#results-table th,
+#results-table td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  white-space: nowrap;
 }
 
-.debug-log-entry pre {
-  white-space: pre-wrap;
-  word-break: break-all;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-2);
-}
+

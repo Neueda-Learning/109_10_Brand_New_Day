@@ -83,11 +83,10 @@ public class JdbcPaymentAnalyticsRepository implements PaymentAnalyticsRepositor
                 ? null
                 : refundAmount.divide(paymentAmount, 4, RoundingMode.HALF_UP).doubleValue());
 
-        // Added 2026-08-06: real query - approval_status column has existed since the
-        // refund-approval schema landed; this was previously hardcoded to 0.
+        String pendingApprovalWhere = (whereClause.isEmpty() ? " WHERE " : whereClause + " AND ")
+                + "type = 'REFUND' AND approval_status = 'PENDING_APPROVAL'";
         Long pendingApprovalCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM payments WHERE type = 'REFUND' AND approval_status = 'PENDING_APPROVAL'",
-                new MapSqlParameterSource(), Long.class);
+                "SELECT COUNT(*) FROM payments" + pendingApprovalWhere, params, Long.class);
         response.setPendingApprovalCount(pendingApprovalCount == null ? 0L : pendingApprovalCount);
 
         List<PaymentInsightsResponse.DailyVolumeEntry> dailyVolume = new ArrayList<>();

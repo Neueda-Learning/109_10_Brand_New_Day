@@ -72,8 +72,6 @@ function renderLifecycleTimeline(containerEl, historyEntries, options) {
       meta.className = "timeline-item-meta";
       meta.textContent = formatChangedAt(step.entry.changedAt) + " \u00B7 " + step.entry.triggeredBy;
       content.appendChild(meta);
-
-
     }
 
     item.appendChild(content);

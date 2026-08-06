@@ -26,16 +26,14 @@ var errorMessage = document.getElementById("error-message");
 var prevPageBtn = document.getElementById("prev-page-btn");
 var nextPageBtn = document.getElementById("next-page-btn");
 
-var detailCard = document.getElementById("detail-card");
+var detailModalEl = document.getElementById("detail-modal");
+var detailModal = new bootstrap.Modal(detailModalEl);
 var timelineEl = document.getElementById("timeline");
 var approvalActions = document.getElementById("detail-approval-actions");
 var approvalError = document.getElementById("approval-error");
-var demoAdvanceBtn = document.getElementById("demo-advance-btn");
-var debugLogPanel = document.getElementById("debug-log-panel");
 
-// --- Theme / mode toggles (Section 14.2/14.3) ---
+// --- Theme toggle (Section 14.2) ---
 AppMode.initThemeToggle(document.getElementById("theme-toggle"));
-AppMode.initModeToggle(document.getElementById("mode-toggle"));
 
 // --- KPI cards (Section 10.10) ---
 function loadInsights() {
@@ -67,18 +65,21 @@ filterForm.addEventListener("submit", function (event) {
   event.preventDefault();
   currentFilters = collectFilters();
   currentPage = 0;
+  loadInsights();
   loadPayments();
 });
 
 prevPageBtn.addEventListener("click", function () {
   if (currentPage > 0) {
     currentPage -= 1;
+    loadInsights();
     loadPayments();
   }
 });
 
 nextPageBtn.addEventListener("click", function () {
   currentPage += 1;
+  loadInsights();
   loadPayments();
 });
 
@@ -119,7 +120,7 @@ function renderResults(result) {
   result.content.forEach(function (payment) {
     var row = document.createElement("tr");
 
-    row.appendChild(makeCell(payment.id));
+    row.appendChild(makeIdCell(payment.id));
     row.appendChild(makeCell(payment.sourceAccount));
     row.appendChild(makeCell(payment.destinationAccount));
     row.appendChild(makeCell(payment.amount.toFixed(2)));
@@ -134,8 +135,8 @@ function renderResults(result) {
     row.appendChild(makeCell(payment.type));
     // paymentMethod/approvalStatus (added 2026-08-05) - not yet on PaymentResponse; renders "—" until then.
     row.appendChild(makeCell(payment.paymentMethod || "—"));
-    row.appendChild(makeCell(payment.approvalStatus || "—"));
-    row.appendChild(makeCell(new Date(payment.createdAt).toLocaleString()));
+    row.appendChild(makeCell(approvalLabel(payment)));
+    row.appendChild(makeCell(formatCreatedAt(payment.createdAt)));
 
     var actionCell = document.createElement("td");
     var viewBtn = document.createElement("button");
@@ -162,6 +163,47 @@ function makeCell(text) {
   var cell = document.createElement("td");
   cell.textContent = text;
   return cell;
+}
+
+// Shows a shortened form of the payment ID (first 8 characters) to keep the
+// ID column compact so the whole results table fits without wrapping the
+// full UUID across multiple lines. The full ID is still available via a
+// hover tooltip and is used as-is for row lookups/actions elsewhere.
+function makeIdCell(id) {
+  var cell = document.createElement("td");
+  cell.textContent = id ? id.slice(0, 8) + "\u2026" : id;
+  cell.title = id;
+  return cell;
+}
+
+// Compact date/time display (e.g. "8/7/26, 5:31 AM") so the Created column
+// stays narrow enough for the whole results table to fit without wrapping.
+function formatCreatedAt(isoString) {
+  var date = new Date(isoString);
+  return date.toLocaleDateString(undefined, { year: "2-digit", month: "numeric", day: "numeric" }) +
+    ", " + date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+// Derives the Approval column label for REFUND rows purely from status: Pending
+// while CREATED, In Progress while VALIDATED/SENT, Approved once COMPLETED,
+// Rejected once FAILED. Independent of approvalStatus so it always shows a value.
+function approvalLabel(payment) {
+  if (payment.type !== "REFUND") {
+    return "—";
+  }
+  if (payment.status === "CREATED") {
+    return "Pending";
+  }
+  if (payment.status === "VALIDATED" || payment.status === "SENT") {
+    return "In Progress";
+  }
+  if (payment.status === "COMPLETED") {
+    return "Approved";
+  }
+  if (payment.status === "FAILED") {
+    return "Rejected";
+  }
+  return "—";
 }
 
 function showError(message) {
@@ -194,13 +236,9 @@ function loadDetail(payment) {
   var canActOnApproval = payment.type === "REFUND" && payment.approvalStatus === "PENDING_APPROVAL";
   approvalActions.hidden = !canActOnApproval;
 
-  // Demo mode auto-advance (Section 14.3) - only offered for non-terminal payments.
-  var isTerminal = payment.status === "COMPLETED" || payment.status === "FAILED";
-  demoAdvanceBtn.hidden = isTerminal || AppMode.getMode() !== "demo";
-
   loadHistory(payment.id, payment.approvalStatus);
 
-  detailCard.hidden = false;
+  detailModal.show();
 }
 
 function loadHistory(paymentId, approvalStatus) {
@@ -223,30 +261,6 @@ function loadHistory(paymentId, approvalStatus) {
     });
 }
 
-demoAdvanceBtn.addEventListener("click", function () {
-  if (!selectedPaymentId) {
-    return;
-  }
-  demoAdvanceBtn.disabled = true;
-  AppMode.autoAdvance(
-    PAYMENTS_API,
-    selectedPaymentId,
-    function (updatedPayment) {
-      loadHistory(updatedPayment.id, updatedPayment.approvalStatus);
-      if (updatedPayment.status === "COMPLETED" || updatedPayment.status === "FAILED") {
-        demoAdvanceBtn.disabled = false;
-        demoAdvanceBtn.hidden = true;
-        loadPayments();
-      }
-    },
-    function (errorBody) {
-      demoAdvanceBtn.disabled = false;
-      approvalError.textContent = "Auto-advance stopped: " + (errorBody.message || "unknown error");
-      approvalError.hidden = false;
-    }
-  );
-});
-
 // --- Refund approval actions (Section 10.8/10.9) ---
 document.getElementById("approve-btn").addEventListener("click", function () {
   submitApprovalAction("approve", { approvedBy: getApproverName() });
@@ -268,8 +282,6 @@ function submitApprovalAction(action, body) {
   approvalError.hidden = true;
   var url = PAYMENTS_API + "/" + encodeURIComponent(selectedPaymentId) + "/refund/" + action;
 
-  AppMode.logRequest(debugLogPanel, { method: "POST", url: url, body: body });
-
   fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -277,7 +289,6 @@ function submitApprovalAction(action, body) {
   })
     .then(function (response) {
       return response.json().then(function (data) {
-        AppMode.logResponse(debugLogPanel, { status: response.status, body: data });
         if (!response.ok) {
           throw new Error(data.message || (action + " failed"));
         }
@@ -286,6 +297,7 @@ function submitApprovalAction(action, body) {
     })
     .then(function (updatedPayment) {
       loadDetail(updatedPayment);
+      loadInsights();
       loadPayments();
     })
     .catch(function (err) {
@@ -293,12 +305,6 @@ function submitApprovalAction(action, body) {
       approvalError.hidden = false;
     });
 }
-
-// Debug mode inspector panel visibility follows the mode toggle.
-document.getElementById("mode-toggle").addEventListener("change", function () {
-  debugLogPanel.hidden = AppMode.getMode() !== "debug";
-});
-debugLogPanel.hidden = AppMode.getMode() !== "debug";
 
 loadInsights();
 loadPayments();
