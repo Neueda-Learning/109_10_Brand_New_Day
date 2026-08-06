@@ -225,9 +225,14 @@ class JdbcPaymentRepositoryTest {
                 .addValue("customerRef", "CUS-CONCUR-TEST")
                 .addValue("displayName", "Concurrency Test Destination")
                 .addValue("now", java.sql.Timestamp.from(Instant.now()));
+        // Balance seeded well above either refund attempt (700.00) so the fail-fast
+        // solvency guard in PaymentServiceImpl.createRefund() (added 2026-08-06) never
+        // short-circuits this test - the thing under test here is the FOR UPDATE lock
+        // serializing the cumulative-refund-vs-original-amount check, not the account
+        // balance guard.
         String insertAccountSql = """
-                INSERT INTO accounts (id, account_number, customer_ref, display_name, account_type, status, default_currency, created_at, updated_at)
-                VALUES (:id, :accountNumber, :customerRef, :displayName, 'CUSTOMER', 'ACTIVE', 'INR', :now, :now)
+                INSERT INTO accounts (id, account_number, customer_ref, display_name, account_type, status, default_currency, balance, created_at, updated_at)
+                VALUES (:id, :accountNumber, :customerRef, :displayName, 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, :now, :now)
                 """;
         jdbcTemplate.update(insertAccountSql, srcAccountParams);
         jdbcTemplate.update(insertAccountSql, dstAccountParams);
