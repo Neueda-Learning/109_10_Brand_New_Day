@@ -33,9 +33,8 @@ var approvalError = document.getElementById("approval-error");
 var demoAdvanceBtn = document.getElementById("demo-advance-btn");
 var debugLogPanel = document.getElementById("debug-log-panel");
 
-// --- Theme / mode toggles (Section 14.2/14.3) ---
+// --- Theme toggle (Section 14.2) ---
 AppMode.initThemeToggle(document.getElementById("theme-toggle"));
-AppMode.initModeToggle(document.getElementById("mode-toggle"));
 
 // --- KPI cards (Section 10.10) ---
 function loadInsights() {
@@ -295,9 +294,6 @@ function submitApprovalAction(action, body) {
 }
 
 // Debug mode inspector panel visibility follows the mode toggle.
-document.getElementById("mode-toggle").addEventListener("change", function () {
-  debugLogPanel.hidden = AppMode.getMode() !== "debug";
-});
 debugLogPanel.hidden = AppMode.getMode() !== "debug";
 
 loadInsights();
