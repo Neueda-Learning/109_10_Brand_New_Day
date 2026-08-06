@@ -27,6 +27,15 @@ public class Payment {
     private String approvedBy;
     private Instant approvedAt;
     private String rejectionReason;
+    // Added 2026-08-06 (bank-grade validation + multi-currency settle-in-INR hardening):
+    // frozen at creation time - never recomputed by any later transition.
+    private String settlementCurrency;
+    private BigDecimal fxRateToInr;
+    private BigDecimal settlementAmountInr;
+    private String requestedBy;
+    private UUID cardId;
+    private String cardLast4;
+    private String cardBrand;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -167,5 +176,61 @@ public class Payment {
 
     public void setRejectionReason(String rejectionReason) {
         this.rejectionReason = rejectionReason;
+    }
+
+    public String getSettlementCurrency() {
+        return settlementCurrency;
+    }
+
+    public void setSettlementCurrency(String settlementCurrency) {
+        this.settlementCurrency = settlementCurrency;
+    }
+
+    public java.math.BigDecimal getFxRateToInr() {
+        return fxRateToInr;
+    }
+
+    public void setFxRateToInr(java.math.BigDecimal fxRateToInr) {
+        this.fxRateToInr = fxRateToInr;
+    }
+
+    public java.math.BigDecimal getSettlementAmountInr() {
+        return settlementAmountInr;
+    }
+
+    public void setSettlementAmountInr(java.math.BigDecimal settlementAmountInr) {
+        this.settlementAmountInr = settlementAmountInr;
+    }
+
+    public String getRequestedBy() {
+        return requestedBy;
+    }
+
+    public void setRequestedBy(String requestedBy) {
+        this.requestedBy = requestedBy;
+    }
+
+    public UUID getCardId() {
+        return cardId;
+    }
+
+    public void setCardId(UUID cardId) {
+        this.cardId = cardId;
+    }
+
+    public String getCardLast4() {
+        return cardLast4;
+    }
+
+    public void setCardLast4(String cardLast4) {
+        this.cardLast4 = cardLast4;
+    }
+
+    public String getCardBrand() {
+        return cardBrand;
+    }
+
+    public void setCardBrand(String cardBrand) {
+        this.cardBrand = cardBrand;
     }
 }
