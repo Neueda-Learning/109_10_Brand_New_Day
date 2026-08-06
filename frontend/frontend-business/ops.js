@@ -26,7 +26,8 @@ var errorMessage = document.getElementById("error-message");
 var prevPageBtn = document.getElementById("prev-page-btn");
 var nextPageBtn = document.getElementById("next-page-btn");
 
-var detailCard = document.getElementById("detail-card");
+var detailModalEl = document.getElementById("detail-modal");
+var detailModal = new bootstrap.Modal(detailModalEl);
 var timelineEl = document.getElementById("timeline");
 var approvalActions = document.getElementById("detail-approval-actions");
 var approvalError = document.getElementById("approval-error");
@@ -201,7 +202,7 @@ function loadDetail(payment) {
 
   loadHistory(payment.id, payment.approvalStatus);
 
-  detailCard.hidden = false;
+  detailModal.show();
 }
 
 function loadHistory(paymentId, approvalStatus) {
