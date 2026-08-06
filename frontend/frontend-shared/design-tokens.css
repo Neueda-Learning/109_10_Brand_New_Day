@@ -195,10 +195,53 @@ th, td {
   padding: 0;
 }
 
-.timeline-item {
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--color-border);
+/* Vertical stepper layout */
+.timeline-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  position: relative;
+  padding: 0 0 var(--space-4) 0;
   animation: timeline-item-reveal var(--transition-base) ease-in-out;
+}
+
+/* Vertical connecting line between dots */
+.timeline-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 20px;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-border);
+}
+
+/* Filled circle dot */
+.timeline-dot {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  border: 2px solid var(--color-surface);
+  outline: 2px solid var(--color-primary);
+  margin-top: 3px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Dim dot for the starting status */
+.timeline-step:first-child .timeline-dot {
+  background: var(--color-border);
+  outline-color: var(--color-border);
+}
+
+.timeline-step-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding-bottom: var(--space-1);
 }
 
 @keyframes timeline-item-reveal {
@@ -206,14 +249,9 @@ th, td {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.timeline-item:last-child {
-  border-bottom: none;
-}
-
-.timeline-item-transition {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+/* Keep legacy .timeline-item styles for any non-step usage */
+.timeline-item {
+  padding: var(--space-3) 0;
 }
 
 .timeline-item-meta {
