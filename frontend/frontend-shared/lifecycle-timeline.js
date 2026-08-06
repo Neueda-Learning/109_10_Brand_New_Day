@@ -42,20 +42,39 @@ function renderLifecycleTimeline(containerEl, historyEntries, options) {
   var list = document.createElement("ul");
   list.className = "timeline";
 
+  // Build the ordered list of unique statuses to display.
+  // For the very first entry that has a fromStatus, prepend it once.
+  var steps = [];
+  if (historyEntries[0] && historyEntries[0].fromStatus) {
+    steps.push({ status: historyEntries[0].fromStatus, entry: null });
+  }
   historyEntries.forEach(function (entry) {
+    steps.push({ status: entry.toStatus, entry: entry });
+  });
+
+  steps.forEach(function (step, idx) {
     var item = document.createElement("li");
-    item.className = "timeline-item";
+    item.className = "timeline-item timeline-step";
 
-    var transition = document.createElement("div");
-    transition.className = "timeline-item-transition";
-    transition.appendChild(makeStatusBadge(entry.toStatus));
-    item.appendChild(transition);
+    // Dot
+    var dot = document.createElement("span");
+    dot.className = "timeline-dot";
+    item.appendChild(dot);
 
-    var meta = document.createElement("div");
-    meta.className = "timeline-item-meta";
-    meta.textContent = formatChangedAt(entry.changedAt) + " \u00B7 triggered by " + entry.triggeredBy;
-    item.appendChild(meta);
+    // Content
+    var content = document.createElement("div");
+    content.className = "timeline-step-content";
 
+    content.appendChild(makeStatusBadge(step.status));
+
+    if (step.entry) {
+      var meta = document.createElement("div");
+      meta.className = "timeline-item-meta";
+      meta.textContent = formatChangedAt(step.entry.changedAt) + " \u00B7 " + step.entry.triggeredBy;
+      content.appendChild(meta);
+    }
+
+    item.appendChild(content);
     list.appendChild(item);
   });
 
@@ -73,3 +92,4 @@ function formatChangedAt(isoString) {
   var date = new Date(isoString);
   return isNaN(date.getTime()) ? isoString : date.toLocaleString();
 }
+

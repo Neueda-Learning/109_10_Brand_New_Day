@@ -40,7 +40,10 @@ public class JdbcPaymentAnalyticsRepository implements PaymentAnalyticsRepositor
         PaymentInsightsResponse response = new PaymentInsightsResponse();
 
         Map<String, Object> totals = jdbcTemplate.queryForMap(
-                "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM payments" + whereClause,
+                // Added 2026-08-06: sum settlement_amount_inr (frozen INR value), not the
+                // raw `amount` column, since `amount` can now be in mixed currencies -
+                // summing it directly would add apples to oranges.
+                "SELECT COUNT(*) AS cnt, COALESCE(SUM(settlement_amount_inr), 0) AS total FROM payments" + whereClause,
                 params);
         response.setTotalCount(((Number) totals.get("cnt")).longValue());
         response.setTotalAmount((BigDecimal) totals.get("total"));
@@ -62,7 +65,7 @@ public class JdbcPaymentAnalyticsRepository implements PaymentAnalyticsRepositor
             amountByType.put(type.name(), BigDecimal.ZERO);
         }
         jdbcTemplate.query(
-                "SELECT type, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM payments"
+                "SELECT type, COUNT(*) AS cnt, COALESCE(SUM(settlement_amount_inr), 0) AS total FROM payments"
                         + whereClause + " GROUP BY type",
                 params,
                 (RowCallbackHandler) rs -> {
@@ -81,14 +84,14 @@ public class JdbcPaymentAnalyticsRepository implements PaymentAnalyticsRepositor
                 : refundAmount.divide(paymentAmount, 4, RoundingMode.HALF_UP).doubleValue());
 
         String pendingApprovalWhere = (whereClause.isEmpty() ? " WHERE " : whereClause + " AND ")
-                + "approval_status = 'PENDING_APPROVAL'";
+                + "type = 'REFUND' AND approval_status = 'PENDING_APPROVAL'";
         Long pendingApprovalCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM payments" + pendingApprovalWhere, params, Long.class);
         response.setPendingApprovalCount(pendingApprovalCount == null ? 0L : pendingApprovalCount);
 
         List<PaymentInsightsResponse.DailyVolumeEntry> dailyVolume = new ArrayList<>();
         jdbcTemplate.query(
-                "SELECT DATE(created_at) AS day, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM payments"
+                "SELECT DATE(created_at) AS day, COUNT(*) AS cnt, COALESCE(SUM(settlement_amount_inr), 0) AS total FROM payments"
                         + whereClause + " GROUP BY DATE(created_at) ORDER BY day",
                 params,
                 (RowCallbackHandler) rs -> dailyVolume.add(new PaymentInsightsResponse.DailyVolumeEntry(

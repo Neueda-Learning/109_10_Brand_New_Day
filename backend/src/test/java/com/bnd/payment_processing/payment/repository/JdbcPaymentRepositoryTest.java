@@ -210,6 +210,28 @@ class JdbcPaymentRepositoryTest {
 
     @Test
     void createRefund_concurrentRequestsExceedingBalance_onlyOneSucceeds() throws Exception {
+        // Bank-grade account validation (added 2026-08-06): PaymentServiceImpl.createRefund()
+        // now requires both accounts to exist/be ACTIVE - register these ad-hoc test
+        // accounts for real (same commit/cleanup pattern as the payment row below).
+        MapSqlParameterSource srcAccountParams = new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID().toString())
+                .addValue("accountNumber", "ACC-CONCUR-SRC")
+                .addValue("customerRef", "CUS-CONCUR-TEST")
+                .addValue("displayName", "Concurrency Test Source")
+                .addValue("now", java.sql.Timestamp.from(Instant.now()));
+        MapSqlParameterSource dstAccountParams = new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID().toString())
+                .addValue("accountNumber", "ACC-CONCUR-DST")
+                .addValue("customerRef", "CUS-CONCUR-TEST")
+                .addValue("displayName", "Concurrency Test Destination")
+                .addValue("now", java.sql.Timestamp.from(Instant.now()));
+        String insertAccountSql = """
+                INSERT INTO accounts (id, account_number, customer_ref, display_name, account_type, status, default_currency, created_at, updated_at)
+                VALUES (:id, :accountNumber, :customerRef, :displayName, 'CUSTOMER', 'ACTIVE', 'INR', :now, :now)
+                """;
+        jdbcTemplate.update(insertAccountSql, srcAccountParams);
+        jdbcTemplate.update(insertAccountSql, dstAccountParams);
+
         Payment original = new Payment();
         original.setId(UUID.randomUUID());
         original.setIdempotencyKey("concurrency-test-" + original.getId());
@@ -270,6 +292,8 @@ class JdbcPaymentRepositoryTest {
             // statement and violate the fk_payments_original_payment constraint.
             jdbcTemplate.update("DELETE FROM payments WHERE original_payment_id = :originalId", params);
             jdbcTemplate.update("DELETE FROM payments WHERE id = :originalId", params);
+            jdbcTemplate.update("DELETE FROM accounts WHERE account_number IN ('ACC-CONCUR-SRC', 'ACC-CONCUR-DST')",
+                    new MapSqlParameterSource());
             TestTransaction.flagForCommit();
             TestTransaction.end();
         }

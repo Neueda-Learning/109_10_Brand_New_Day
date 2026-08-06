@@ -13,9 +13,16 @@ import com.bnd.payment_processing.payment.dto.RefundRequest;
 import com.bnd.payment_processing.payment.dto.RejectRefundRequest;
 import com.bnd.payment_processing.payment.model.Payment;
 import com.bnd.payment_processing.payment.model.ApprovalStatus;
+import com.bnd.payment_processing.payment.model.Account;
+import com.bnd.payment_processing.payment.model.AccountStatus;
+import com.bnd.payment_processing.payment.model.AccountType;
+import com.bnd.payment_processing.payment.model.ExchangeRate;
 import com.bnd.payment_processing.payment.model.PaymentMethod;
 import com.bnd.payment_processing.payment.model.PaymentStatus;
 import com.bnd.payment_processing.payment.model.PaymentType;
+import com.bnd.payment_processing.payment.repository.AccountRepository;
+import com.bnd.payment_processing.payment.repository.CardRepository;
+import com.bnd.payment_processing.payment.repository.ExchangeRateRepository;
 import com.bnd.payment_processing.payment.repository.PaymentRepository;
 import com.bnd.payment_processing.payment.repository.PaymentStatusHistoryRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -54,11 +62,48 @@ class PaymentServiceImplTest {
     @Mock
     private PaymentStatusHistoryRepository paymentStatusHistoryRepository;
 
+    @Mock
+    private AccountRepository accountRepository;
+
+    @Mock
+    private ExchangeRateRepository exchangeRateRepository;
+
+    @Mock
+    private CardRepository cardRepository;
+
     private PaymentServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new PaymentServiceImpl(paymentRepository, paymentStatusHistoryRepository);
+        service = new PaymentServiceImpl(paymentRepository, paymentStatusHistoryRepository,
+                accountRepository, exchangeRateRepository, cardRepository);
+
+        // Default happy-path stubs (added 2026-08-06 for bank-grade account/currency
+        // hardening) - every existing test in this file only ever uses ACC-1001/
+        // ACC-2002/INR, so stub those as ACTIVE/supported by default. lenient() since
+        // not every test path reaches these checks (e.g. searchPayments tests).
+        lenient().when(accountRepository.findByAccountNumber(anyString()))
+                .thenAnswer(inv -> Optional.of(activeAccount(inv.getArgument(0))));
+        lenient().when(exchangeRateRepository.findByCurrency(anyString()))
+                .thenReturn(Optional.of(rate("INR", new BigDecimal("1.00000000"))));
+    }
+
+    private Account activeAccount(String accountNumber) {
+        Account account = new Account();
+        account.setAccountNumber(accountNumber);
+        account.setCustomerRef("CUS-TEST-001");
+        account.setDisplayName("Test Account");
+        account.setAccountType(AccountType.CUSTOMER);
+        account.setStatus(AccountStatus.ACTIVE);
+        account.setDefaultCurrency("INR");
+        return account;
+    }
+
+    private ExchangeRate rate(String currency, BigDecimal rateToInr) {
+        ExchangeRate rate = new ExchangeRate();
+        rate.setCurrency(currency);
+        rate.setRateToInr(rateToInr);
+        return rate;
     }
 
     private CreatePaymentRequest newCreateRequest() {

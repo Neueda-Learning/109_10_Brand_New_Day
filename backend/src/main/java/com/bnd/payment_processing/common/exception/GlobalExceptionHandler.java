@@ -47,6 +47,38 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.CONFLICT, "REFUND_NOT_APPROVED", ex.getMessage(), request);
     }
 
+    // --- Added 2026-08-06 (bank-grade account/card/currency validation hardening) ---
+
+    @ExceptionHandler(AccountNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleAccountNotFound(AccountNotFoundException ex, WebRequest request) {
+        return buildError(HttpStatus.NOT_FOUND, "ACCOUNT_NOT_FOUND", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(AccountBlockedException.class)
+    public ResponseEntity<ErrorResponse> handleAccountBlocked(AccountBlockedException ex, WebRequest request) {
+        return buildError(HttpStatus.CONFLICT, "ACCOUNT_BLOCKED", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(UnsupportedCurrencyException.class)
+    public ResponseEntity<ErrorResponse> handleUnsupportedCurrency(UnsupportedCurrencyException ex, WebRequest request) {
+        return buildError(HttpStatus.BAD_REQUEST, "UNSUPPORTED_CURRENCY", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(CardNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleCardNotFound(CardNotFoundException ex, WebRequest request) {
+        return buildError(HttpStatus.NOT_FOUND, "CARD_NOT_FOUND", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(CardDeclinedException.class)
+    public ResponseEntity<ErrorResponse> handleCardDeclined(CardDeclinedException ex, WebRequest request) {
+        return buildError(HttpStatus.CONFLICT, "CARD_DECLINED", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(SegregationOfDutiesException.class)
+    public ResponseEntity<ErrorResponse> handleSegregationOfDuties(SegregationOfDutiesException ex, WebRequest request) {
+        return buildError(HttpStatus.CONFLICT, "SEGREGATION_OF_DUTIES_VIOLATION", ex.getMessage(), request);
+    }
+
     /**
      * Not a real error - a duplicate idempotency_key on POST /api/payments means
      * "return the original resource" (spec.md Section 10.7), so this bypasses the
