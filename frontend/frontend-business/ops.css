@@ -72,4 +72,19 @@
   text-align: right;
 }
 
+/* Keep the results table compact so all columns fit in view together
+   instead of wrapping cell text across several lines (spec.md Section 14.1). */
+#results-table {
+  font-size: 0.875rem;
+}
+
+#results-table th,
+#results-table td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  white-space: nowrap;
+}
+
 

@@ -120,7 +120,7 @@ function renderResults(result) {
   result.content.forEach(function (payment) {
     var row = document.createElement("tr");
 
-    row.appendChild(makeCell(payment.id));
+    row.appendChild(makeIdCell(payment.id));
     row.appendChild(makeCell(payment.sourceAccount));
     row.appendChild(makeCell(payment.destinationAccount));
     row.appendChild(makeCell(payment.amount.toFixed(2)));
@@ -136,7 +136,7 @@ function renderResults(result) {
     // paymentMethod/approvalStatus (added 2026-08-05) - not yet on PaymentResponse; renders "—" until then.
     row.appendChild(makeCell(payment.paymentMethod || "—"));
     row.appendChild(makeCell(approvalLabel(payment)));
-    row.appendChild(makeCell(new Date(payment.createdAt).toLocaleString()));
+    row.appendChild(makeCell(formatCreatedAt(payment.createdAt)));
 
     var actionCell = document.createElement("td");
     var viewBtn = document.createElement("button");
@@ -163,6 +163,25 @@ function makeCell(text) {
   var cell = document.createElement("td");
   cell.textContent = text;
   return cell;
+}
+
+// Shows a shortened form of the payment ID (first 8 characters) to keep the
+// ID column compact so the whole results table fits without wrapping the
+// full UUID across multiple lines. The full ID is still available via a
+// hover tooltip and is used as-is for row lookups/actions elsewhere.
+function makeIdCell(id) {
+  var cell = document.createElement("td");
+  cell.textContent = id ? id.slice(0, 8) + "\u2026" : id;
+  cell.title = id;
+  return cell;
+}
+
+// Compact date/time display (e.g. "8/7/26, 5:31 AM") so the Created column
+// stays narrow enough for the whole results table to fit without wrapping.
+function formatCreatedAt(isoString) {
+  var date = new Date(isoString);
+  return date.toLocaleDateString(undefined, { year: "2-digit", month: "numeric", day: "numeric" }) +
+    ", " + date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 // Derives the Approval column label for REFUND rows purely from status: Pending
