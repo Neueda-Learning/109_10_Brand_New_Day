@@ -1,9 +1,14 @@
 # Payment Processing System - Unified Specification & Progress Log
 
 Status: ACTIVE (living document — update it as work progresses)
-Version: 2.2
-Last Updated: 2026-08-05
+Version: 2.6
+Last Updated: 2026-08-06
 Source of Truth: This file only.
+
+> Note: several 2026-08-06 changes (bank-grade hardening, multi-currency, balances/KPI
+> transparency, refund-lifecycle ops fixes, this CI/CD pipeline) were implemented and
+> logged in Section 18 across the day before this header was bumped to match - the
+> header now reflects the true latest state as of the CI/CD addition below (Section 20).
 
 ## 1. How to Use This Spec
 
@@ -40,8 +45,10 @@ agent) to see current project state at a glance.
 | M3 - Idempotency, Errors, Refund | Tharan | DONE | DONE | DONE | IN_PROGRESS | Idempotency short-circuit, refund rules, full `GlobalExceptionHandler` mapping implemented; `detail.html`/`detail.js` wired to real API (PR #2, merged) |
 | M4 - Query API, Lifecycle UI, Design System, API Docs | Karuna | DONE | DONE | DONE | IN_PROGRESS | `GET /api/payments` filter/pagination + `lifecycle-timeline.js`/`dashboard.html`/`history.html` implemented and unit-tested; on `feature/m4-lifecycle-ui`, not yet merged to `main` |
 
+| CI/CD Infrastructure (Maven wrapper, Dockerfiles, GitHub Actions, GHCR, Jenkins/ngrok deploy) | Team | — | — | — | DONE | `backend/mvnw`/`Dockerfile`, `frontend/Dockerfile`, `.github/workflows/backend-ci.yml`/`frontend-ci.yml`, root `docker-compose.yml` replaced with the GHCR-image stack — see Section 20 (added 2026-08-06) |
+
 Status values: `NOT_STARTED`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
-Overall project phase: **Phase 2 (Backend/Frontend Impl) — DONE for M1-M4 on their respective branches. Phase 3 (cross-module integration validation, e.g. end-to-end refund/process/query flows together, PR review, merge of `feature/m4-lifecycle-ui` into `main`) is IN_PROGRESS.**
+Overall project phase: **Phase 2 (Backend/Frontend Impl) — DONE for M1-M4 on their respective branches, plus the 2026-08-06 bank-grade hardening (multi-currency/CARD/accounts), balances/KPI transparency, and refund-lifecycle ops.js fixes (Section 18). Phase 3 (cross-module integration validation) is IN_PROGRESS. CI/CD pipeline (Section 20) is DONE.**
 
 **v2.2 scope (added 2026-08-05):** payment method, refund approval workflow, insights
 endpoint, and the unified business frontend (Sections 4/5/7/8.1/9/10/14/16) are
@@ -1435,6 +1442,19 @@ Recommended merge order for the 2026-08-05 additions (each depends on the schema
 the first): `feature/m3-refund-approval` -> `feature/shared-dataset-v2` ->
 `feature/m4-insights-api` -> `feature/m4-business-ui`.
 
+- (Added 2026-08-06) `feature/user-frontend-payment-gateway-redesign` — bank-grade
+  checkout redesign (Section 18).
+- (Added 2026-08-06) `feature/user-balances-kpi-transparency` — live account balances,
+  exchange-rate chips, Kishore-scoped client-side KPIs, Confirm Payment modal, BND Bank
+  rebrand (Section 18).
+- (Added 2026-08-06) `feature/refund-lifecycle-ops-user-fixes` — fixed refunds stuck at
+  `CREATED`/`APPROVED` (missing auto-advance after approve), 15s KPI/table polling on
+  `ops.html`, deferred account/card validation to the lifecycle instead of creation
+  (Section 18).
+- (Added 2026-08-06) `ci/cd-pipeline` — GitHub Actions (`backend-ci.yml`/`frontend-ci.yml`),
+  Maven wrapper, backend/frontend `Dockerfile`s, GHCR image publish, Jenkins deploy
+  trigger (Section 20).
+
 PR policy:
 - Small PRs only.
 - One reviewer minimum.
@@ -1466,6 +1486,8 @@ history — keep entries short and factual.
 | 2026-08-06 | Removed the fail-fast, creation-time balance check added earlier the same day: a payment/refund must always be allowed to be `CREATED` regardless of the source account's balance — insufficient funds is a lifecycle/settlement-time concern, not a creation-time rejection, so customers should never see an "insufficient funds" error block the checkout form itself. `PaymentServiceImpl.createPayment()`/`createRefund()` no longer read `Account.balance` or throw `InsufficientFundsException` at creation; every payment/refund now always reaches `CREATED` and proceeds through its normal lifecycle. The **only** insufficient-funds guard remaining is the pre-existing authoritative, race-safe `accountRepository.debitIfSufficient()` atomic re-check inside `processTransition()` at the `SENT -> COMPLETED` transition, which degrades the transition to `FAILED`/`errorCode=INSUFFICIENT_FUNDS` (recorded as a normal `payment_status_history` row) instead of completing — exactly mirroring how a real payment "sails" through validation/routing/sending and is only ever declined at actual settlement. `InsufficientFundsException`/`GlobalExceptionHandler`'s 409 mapping are left in place (unused for now) in case a future feature needs them. |
 | 2026-08-06 | Branch `feature/refund-lifecycle-ops-user-fixes`: (1) **Fixed refunds getting stuck at CREATED/APPROVED forever** — `ops.js`'s approve action only ever called `POST /refund/approve` (which just flips `approvalStatus`), never `POST /{id}/process`, so nothing advanced an approved refund's lifecycle. Now calls the existing `AppMode.autoAdvance()` helper after a successful approve to drive `CREATED -> VALIDATED -> SENT -> COMPLETED/FAILED`, live-updating the detail modal's status/timeline and re-fetching KPIs/table on every step; a rejected refund is already terminal (`FAILED` via `rejectRefund()`) so it's excluded from auto-advance. Added a "Processing refund…" indicator while auto-advance runs. (2) Added a 15s polling refresh of KPI cards + results table on `ops.html` (paused while the detail modal is open) so the dashboard feels live without manual re-search. (3) Rebranded `ops.html` "Operations Dashboard" → "BND Bank Ops". (4) **Deferred account/card validation from creation time to the lifecycle**, mirroring the insufficient-funds treatment: `PaymentServiceImpl.createPayment()` no longer calls `requireActiveAccount()` (a typo'd/blocked account number no longer blocks `POST /api/payments`) and no longer throws `CardNotFoundException`/`CardDeclinedException` for a bad CARD (wrong CVV, blocked, expired) — the CVV is still verified once at creation and never persisted, but only the resulting decline *classification* (`CARD_NOT_FOUND`/`CARD_DECLINED`, no card/CVV data) is pre-flagged onto the payment's existing `errorCode` column. `processTransition()`'s `CREATED -> VALIDATED` step now re-checks both accounts (`findAccountValidationError()`) and applies any pre-flagged CARD error, degrading to `FAILED`/`ACCOUNT_NOT_FOUND`/`ACCOUNT_BLOCKED`/`CARD_NOT_FOUND`/`CARD_DECLINED` instead of throwing at creation — a payment always reaches `CREATED` and only ever fails during its normal lifecycle. `cardId` being entirely missing when `paymentMethod=CARD` is still a hard 400 (request-shape error, not a decline). Added matching unit tests in `PaymentServiceImplTest`. (5) `frontend-user`: renamed the transaction search box from "Search by UUID" to "Search by Payment ID"; added a Sort control (Newest/Oldest/Amount high→low/low→high); added an `ERROR_CODE_COPY` map so a `FAILED` payment/refund shows a plain-English reason (per errorCode) instead of a bare code, both in the processing overlay and the transaction detail panel. No existing endpoint or working feature removed. |
 
+| 2026-08-06 | CI/CD pipeline added (branch `ci/cd-pipeline`, Section 20): generated the official Maven Wrapper in `backend/` (`mvnw`/`mvnw.cmd`/`.mvn/wrapper/maven-wrapper.properties`, pinned to Maven 3.9.9); added `backend/Dockerfile` (multi-stage `eclipse-temurin:25-jdk` build → `eclipse-temurin:25-jre` runtime) and `frontend/Dockerfile` (`nginx:alpine` serving the static apps as-is) plus matching `.dockerignore` files; replaced the root `docker-compose.yml` (previously MySQL-only, with a documented credential divergence from `application.properties`) with a full 3-service stack (`bnd-pp-mysql`/`bnd-api`/`bnd-ui`) now using the same `root`/`n3u3da!` credentials as `application.properties`, closing that divergence; added `.github/workflows/backend-ci.yml` (JDK 25 + MySQL 8.4 service container + `./mvnw clean verify`, then on push to `main` builds/pushes `ghcr.io/neueda-learning/bnd-api:latest` and curls a Jenkins deploy-job trigger) and `.github/workflows/frontend-ci.yml` (same push/build/push/trigger pattern for `ghcr.io/neueda-learning/bnd-ui:latest`, no build step needed for static files). Also synced Section 2 (Status Dashboard), Section 16 (branch list), README.md, and info.md to reflect this plus the previously-undocumented `feature/user-balances-kpi-transparency` and `feature/refund-lifecycle-ops-user-fixes` frontend work. |
+
 ## 19. Immediate Execution Checklist
 
 Backbone checklist for this week:
@@ -1495,4 +1517,99 @@ v2.2 checklist (added 2026-08-05, spec-approved, implementation not started):
       (Section 9 M4, Section 10.10).
 - [ ] `feature/m4-business-ui` — unified `ops.html`/`ops.js`/`ops.css`, brand/theme
       rework, Debug/Demo toggle (Section 14.1/14.2/14.3).
+
+## 20. CI/CD Pipeline (added 2026-08-06)
+
+Monorepo CI (GitHub Actions) + CD (Jenkins, triggered remotely) + Docker/GHCR + ngrok.
+This section is the canonical reference for the pipeline; `info.md` Sections 12-17
+summarize it for quick lookup and must stay in sync with this section.
+
+### 20.1 Files
+
+| File | Purpose |
+|---|---|
+| `backend/mvnw` / `mvnw.cmd` / `.mvn/wrapper/maven-wrapper.properties` | Maven Wrapper, pinned to Maven 3.9.9 (matches the version verified locally) so CI never depends on a pre-installed Maven. |
+| `backend/Dockerfile` | Multi-stage: `eclipse-temurin:25-jdk` builds the jar via `./mvnw -DskipTests package`, `eclipse-temurin:25-jre` runs it (`EXPOSE 8080`). Self-contained — `docker build backend` works standalone, not just in CI. |
+| `backend/.dockerignore` | Excludes `target/`, `.git/`, docs, IDE folders from the build context. |
+| `frontend/Dockerfile` | `nginx:alpine` + `COPY . /usr/share/nginx/html` — serves `frontend-user/`, `frontend-business/`, `frontend-shared/` at their existing relative paths, no bundler/build step (Section 4 hard constraint). |
+| `frontend/.dockerignore` | Excludes `.git/`, docs. |
+| `.github/workflows/backend-ci.yml` | CI for `backend/**` changes (see 20.2). |
+| `.github/workflows/frontend-ci.yml` | CI for `frontend/**` changes (see 20.2). |
+| `docker-compose.yml` (repo root) | Full deployment stack: `bnd-pp-mysql` (MySQL 8.4), `bnd-api` (from GHCR, `8082:8080`), `bnd-ui` (from GHCR, `8081:80`) — credentials match `application.properties` (`root`/`n3u3da!`). Replaces the old MySQL-only local-dev compose; plain `mvn spring-boot:run` + a standalone MySQL is still the supported path for iterative local development. |
+
+### 20.2 CI — What Runs on Push/PR to `main`
+
+**`backend-ci.yml`**: checkout → JDK 25 (temurin) → MySQL 8.4 service container
+(`root`/`n3u3da!`, db `payment_processing`, healthchecked) → `chmod +x mvnw` →
+`./mvnw clean verify`. On `push` only (not PRs): log in to GHCR, build/push
+`ghcr.io/neueda-learning/bnd-api:latest`, then `curl` the Jenkins `bnd-api-deploy-job`
+trigger URL using the `JENKINS_URL`/`JENKINS_TOKEN` repo secrets.
+
+**`frontend-ci.yml`**: checkout only for PRs (status check, no build needed for static
+files). On `push` only: log in to GHCR, build/push `ghcr.io/neueda-learning/bnd-ui:latest`,
+then `curl` the Jenkins `bnd-ui-deploy-job` trigger URL.
+
+Both workflows are path-filtered (`backend/**`/`frontend/**`) so an unrelated change
+doesn't trigger the other side's pipeline.
+
+### 20.3 Required GitHub Secrets
+
+| Secret | Value |
+|---|---|
+| `JENKINS_URL` | e.g. `https://<ngrok-subdomain>.ngrok-free.app` |
+| `JENKINS_TOKEN` | Jenkins build token for the two Freestyle jobs below |
+
+`GITHUB_TOKEN` (built-in, no setup needed) authenticates the GHCR push via
+`permissions: packages: write` implicitly granted to `docker/login-action`.
+
+### 20.4 CD — Jenkins (external to this repo, not provisioned by this workspace)
+
+Two Freestyle jobs, each with "Trigger builds remotely" enabled:
+
+| Job | Trigger URL pattern |
+|---|---|
+| `bnd-api-deploy-job` | `.../job/bnd-api-deploy-job/build?token=<token>` |
+| `bnd-ui-deploy-job` | `.../job/bnd-ui-deploy-job/build?token=<token>` |
+
+Each job's build step, on the deploy host:
+```bash
+cd /opt/bnd
+docker compose pull
+docker compose down
+docker compose up -d
+docker compose ps
+```
+
+### 20.5 ngrok (external, exposes the Jenkins server for GitHub's curl trigger)
+
+```bash
+ngrok config add-authtoken <YOUR_NGROK_AUTHTOKEN>
+ngrok http 8080
+```
+The resulting `https://xxxx.ngrok-free.app` URL is `JENKINS_URL` (Section 20.3).
+
+### 20.6 End-to-End Flow
+
+```mermaid
+flowchart LR
+    Dev[Developer git push main] --> GHA[GitHub Actions CI]
+    GHA -->|build+test+docker| GHCR[GHCR: bnd-api / bnd-ui]
+    GHA -->|curl via ngrok| Jenkins[Jenkins deploy job]
+    Jenkins --> Compose[docker compose up -d]
+    Compose --> Running[MySQL + API + UI running]
+```
+
+### 20.7 Verification
+
+```bash
+open http://<server-ip>:8081/frontend-user/index.html
+curl http://<server-ip>:8082/actuator/health
+open http://<server-ip>:8082/swagger-ui.html
+docker ps
+```
+
+Note: the Jenkins server, ngrok tunnel, and target deploy host itself are external
+infrastructure the team provisions — not something buildable from within this
+repo/workspace. This section documents the contract (files, secrets, trigger URLs) the
+repo side owns.
 

@@ -261,99 +261,90 @@ Per `spec.md` Section 15:
 
 ## 12. GitHub Actions File for CI
 
-**Not set up yet** — no `.github/workflows/` directory exists in this repo. Suggested
-minimal starter (not yet added — create only when the team is ready to adopt CI):
+**Implemented (added 2026-08-06)** — `.github/workflows/backend-ci.yml` and
+`.github/workflows/frontend-ci.yml`, both path-filtered to their respective folders.
 
-```yaml
-# .github/workflows/backend-ci.yml
-name: Backend CI
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
-      - name: Build (no tests DB available in CI yet)
-        working-directory: backend
-        run: mvn -q -DskipTests compile
-```
-A full test-inclusive pipeline would additionally need a MySQL service container
-(`services: mysql: image: mysql:8.0 ...`) matching `schema.sql`/`data.sql`.
+`backend-ci.yml`: checkout → JDK 25 (temurin) → MySQL 8.4 service container
+(`root`/`n3u3da!`, db `payment_processing`) → `chmod +x mvnw` → `./mvnw clean verify`.
+On `push` to `main` only: log in to GHCR, build/push `ghcr.io/neueda-learning/bnd-api:latest`,
+then curl-trigger the Jenkins `bnd-api-deploy-job` (Section 15) using the
+`JENKINS_URL`/`JENKINS_TOKEN` repo secrets.
+
+`frontend-ci.yml`: checkout (no build step needed — static files only). On `push` to
+`main` only: build/push `ghcr.io/neueda-learning/bnd-ui:latest`, then curl-trigger the
+Jenkins `bnd-ui-deploy-job`.
+
+Full contract and diagram: `spec.md` Section 20.
 
 ## 13. Dockerfile
 
-**Not set up yet** — there is no `Dockerfile` for the Spring Boot app itself; only
-`docker-compose.yml` at the repo root, which provisions **MySQL only** (see Section 14).
-A basic app Dockerfile would look like:
+**Implemented (added 2026-08-06):**
 
-```dockerfile
-# backend/Dockerfile (not yet created)
-FROM eclipse-temurin:25-jre
-WORKDIR /app
-COPY target/*.jar app.jar
-ENTRYPOINT ["java", "-jar", "app.jar"]
-```
-(would need `mvn package` to produce the jar first, and a matching build stage or CI step).
+`backend/Dockerfile` — multi-stage: `eclipse-temurin:25-jdk` builds the jar via
+`./mvnw -DskipTests package`, then `eclipse-temurin:25-jre` runs it (`EXPOSE 8080`).
+Self-contained — `docker build backend` works standalone, not just from CI.
+
+`frontend/Dockerfile` — `nginx:alpine` + `COPY . /usr/share/nginx/html`, serving
+`frontend-user/`, `frontend-business/`, `frontend-shared/` at their existing relative
+paths (no bundler/build step, per the Section 4 hard constraint).
+
+Both folders also have a matching `.dockerignore` (`target/`/`.git`/docs excluded).
 
 ## 14. Docker Compose
 
-`docker-compose.yml` (repo root) — currently **MySQL only**, no app service defined yet:
+`docker-compose.yml` (repo root) — **replaced 2026-08-06** with a full 3-service
+deployment stack (previously MySQL-only):
 
 ```yaml
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: bnd-pp-mysql
-    environment:
-      MYSQL_DATABASE: payment_processing
-      MYSQL_USER: payment_app
-      MYSQL_PASSWORD: payment_app
-      MYSQL_ROOT_PASSWORD: root
-    ports:
-      - "3306:3306"
-    volumes:
-      - bnd-pp-mysql-data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+  mysql:      # bnd-pp-mysql, MySQL 8.4, port 3306
+  api:        # bnd-api, ghcr.io/neueda-learning/bnd-api:latest, 8082:8080
+  ui:         # bnd-ui, ghcr.io/neueda-learning/bnd-ui:latest, 8081:80
 ```
-Standard local dev command: `docker compose up -d`. Note: `application.properties`
-must point at credentials that actually match whichever MySQL instance is running
-(this compose file's `payment_app`/`payment_app`, or a separately-installed native
-MySQL server) — see the troubleshooting notes already captured in this session.
+Credentials (`root`/`n3u3da!`) now match `application.properties` exactly, closing the
+divergence this section used to document. Standard deploy command:
+`docker compose pull && docker compose up -d`. For plain local iterative development
+without Docker, `mvn spring-boot:run` / `.\mvnw.cmd spring-boot:run` against a
+standalone MySQL is still fully supported (see README.md Getting Started).
 
 ## 15. Jenkins Job
 
-**Not set up.** No `Jenkinsfile` exists in the repo, and there's no indication a Jenkins
-server is in use for this project — GitHub Actions (Section 12) is the more likely CI
-fit given the repo already lives on GitHub. Add a `Jenkinsfile` only if the team
-specifically adopts Jenkins.
+**Documented, external to this repo (added 2026-08-06)** — no `Jenkinsfile` is needed;
+Jenkins is used as two Freestyle jobs with "Trigger builds remotely" enabled, called by
+the GitHub Actions workflows (Section 12) via `curl`:
+
+| Job | Trigger URL pattern |
+|---|---|
+| `bnd-api-deploy-job` | `.../job/bnd-api-deploy-job/build?token=<token>` |
+| `bnd-ui-deploy-job` | `.../job/bnd-ui-deploy-job/build?token=<token>` |
+
+Each job's build step runs `docker compose pull && docker compose down && docker compose
+up -d` on the deploy host. Provisioning the actual Jenkins server is external
+infrastructure, not part of this repo/workspace — see `spec.md` Section 20.4.
 
 ## 16. ngrok
 
-**Not set up.** No ngrok config/scripts in the repo. Would only be relevant for exposing
-the local backend (`localhost:8080`) to the internet temporarily (e.g. demoing to someone
-outside the network): `ngrok http 8080`. Not part of the current local dev workflow
-(frontend and backend both run on `localhost` today).
+**Documented, external to this repo (added 2026-08-06)** — used only to expose the
+Jenkins server so GitHub Actions' `curl` trigger can reach it:
+```bash
+ngrok config add-authtoken <YOUR_NGROK_AUTHTOKEN>
+ngrok http 8080
+```
+The resulting `https://xxxx.ngrok-free.app` URL becomes the `JENKINS_URL` GitHub secret
+(Section 12). Not part of the local dev workflow itself.
 
 ## 17. CI/CD
 
-**Not set up.** Current workflow is fully manual:
-1. `mvn -q -DskipTests compile` locally to verify the build.
-2. Manual `git push` to `main` (no PR/branch-protection gate yet — see Section 8).
-3. No automated deploy target exists (no cloud/hosting config found in the repo).
+**Implemented (added 2026-08-06)** — end-to-end pipeline:
+1. `git push` to `main` (or open a PR — CI still runs, deploy steps are push-only).
+2. GitHub Actions (Section 12) builds/tests, then builds+pushes Docker images to GHCR.
+3. GitHub Actions `curl`s the Jenkins deploy job (via ngrok, Section 16) using the
+   `JENKINS_URL`/`JENKINS_TOKEN` repo secrets.
+4. Jenkins (Section 15) runs `docker compose pull/down/up -d` on the deploy host using
+   the root `docker-compose.yml` (Section 14).
 
-Recommended future path once the team is ready: GitHub Actions for CI (Section 12) →
-branch protection + required PR reviews (Section 8) → containerize with a `Dockerfile`
-(Section 13) → optional CD step to push the built image somewhere. None of this is
-implemented yet; this section will need updating once any of it lands.
+Full reference/diagram: `spec.md` Section 20. Branch protection + required PR reviews
+(Section 8) are still not enforced — recommended next step, not yet implemented.
 
 ## 18. System Architecture & State Transitions
 
@@ -364,27 +355,25 @@ High-level architecture and lifecycle diagrams for the whole system (derived fro
 
 ```mermaid
 flowchart TB
-    subgraph Frontend User["frontend-user (static)"]
-        FU1[index.html<br/>+ index.js]
-        FU2[history.html<br/>+ history.js]
-        FU3[detail.html<br/>+ detail.js]
+    subgraph Frontend User["frontend-user (static, unified page since 2026-08-05)"]
+        FU1[index.html<br/>+ script.js + styles.css]
     end
 
-    subgraph Frontend Business["frontend-business (static)"]
-        FB1[dashboard.html<br/>+ dashboard.js]
-        FB2[audit.html<br/>+ audit.js]
+    subgraph Frontend Business["frontend-business (static, unified page since 2026-08-05)"]
+        FB1[ops.html<br/>+ ops.js + ops.css]
     end
 
     subgraph Shared["frontend-shared"]
         S1[design-tokens.css]
         S2[lifecycle-timeline.js]
+        S3[app-mode.js]
     end
 
-    FU2 --> S2
-    FB2 --> S2
-    FU1 & FU2 & FU3 & FB1 & FB2 --> S1
+    FU1 --> S2 & S3
+    FB1 --> S2 & S3
+    FU1 & FB1 --> S1
 
-    subgraph Backend["Spring Boot Backend (localhost:8080)"]
+    subgraph Backend["Spring Boot Backend (localhost:8080, containerized as bnd-api since 2026-08-06)"]
         CORS[CorsConfig]
         subgraph Controllers
             PC[PaymentController<br/>POST /payments, GET /payments/id,<br/>POST /process, POST /refund]
@@ -394,31 +383,43 @@ flowchart TB
         subgraph Repos
             PR[JdbcPaymentRepository]
             PSHR[JdbcPaymentStatusHistoryRepository]
+            AR[JdbcAccountRepository]
+            CR[JdbcCardRepository]
+            ERR[JdbcExchangeRateRepository]
         end
         GEH[GlobalExceptionHandler]
         OAC[OpenApiConfig<br/>/swagger-ui.html]
     end
 
-    FU1 & FU3 -- fetch --> PC
-    FU2 -- fetch --> PC
-    FB1 -- fetch --> PQC
-    FB2 -- fetch --> PC
+    FU1 -- fetch --> PC & PQC
+    FB1 -- fetch --> PC & PQC
 
     PC --> SVC
     PQC --> SVC
     SVC --> PR
     SVC --> PSHR
+    SVC --> AR
+    SVC --> CR
+    SVC --> ERR
     PC -.throws.-> GEH
     PQC -.throws.-> GEH
 
-    subgraph DB["MySQL (Docker, localhost:3306)"]
+    subgraph DB["MySQL (bnd-pp-mysql container since 2026-08-06, localhost:3306)"]
         T1[(payments)]
         T2[(payment_status_history)]
+        T3[(accounts)]
+        T4[(cards)]
+        T5[(exchange_rates)]
     end
 
     PR --> T1
     PSHR --> T2
+    AR --> T3
+    CR --> T4
+    ERR --> T5
     T1 -. FK .- T2
+    T1 -. FK .- T3
+    T1 -. FK .- T4
 ```
 
 Key points:
@@ -431,6 +432,9 @@ Key points:
   controllers, producing the shared `ErrorResponse` shape (spec Section 10.7).
 - `CorsConfig` is the only cross-origin bridge between the frontend static origin(s)
   (`localhost:5500`/`3000`) and the backend (`localhost:8080`).
+- As of 2026-08-06, both apps also run containerized (`bnd-api`/`bnd-ui` images, built
+  and pushed to GHCR by CI, served via the root `docker-compose.yml`) as an alternative
+  to local `mvn spring-boot:run` + Live Server — see Section 17 / `spec.md` Section 20.
 
 ### 18.2 Payment Lifecycle State Transitions
 

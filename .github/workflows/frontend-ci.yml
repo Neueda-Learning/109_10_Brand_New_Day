@@ -1,0 +1,45 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Static HTML/CSS/JS only (spec.md Section 4 hard constraint) - no Node/build
+      # step, nginx serves the pages directly. PRs just get this checkout run so the
+      # workflow still reports a status check; only pushes to main build/push/deploy.
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push bnd-ui image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: ghcr.io/neueda-learning/bnd-ui:latest
+
+      - name: Trigger Jenkins deploy job
+        if: github.event_name == 'push'
+        run: |
+          curl -fsS "${{ secrets.JENKINS_URL }}/job/bnd-ui-deploy-job/build?token=${{ secrets.JENKINS_TOKEN }}"
