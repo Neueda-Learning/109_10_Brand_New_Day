@@ -31,6 +31,12 @@ public class PaymentResponse {
     private String approvedBy;
     private Instant approvedAt;
     private String rejectionReason;
+    // Added 2026-08-06 (bank-grade + multi-currency settle-in-INR hardening).
+    private String settlementCurrency;
+    private BigDecimal fxRateToInr;
+    private BigDecimal settlementAmountInr;
+    private String cardLast4;
+    private String cardBrand;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -171,5 +177,45 @@ public class PaymentResponse {
 
     public void setRejectionReason(String rejectionReason) {
         this.rejectionReason = rejectionReason;
+    }
+
+    public String getSettlementCurrency() {
+        return settlementCurrency;
+    }
+
+    public void setSettlementCurrency(String settlementCurrency) {
+        this.settlementCurrency = settlementCurrency;
+    }
+
+    public BigDecimal getFxRateToInr() {
+        return fxRateToInr;
+    }
+
+    public void setFxRateToInr(BigDecimal fxRateToInr) {
+        this.fxRateToInr = fxRateToInr;
+    }
+
+    public BigDecimal getSettlementAmountInr() {
+        return settlementAmountInr;
+    }
+
+    public void setSettlementAmountInr(BigDecimal settlementAmountInr) {
+        this.settlementAmountInr = settlementAmountInr;
+    }
+
+    public String getCardLast4() {
+        return cardLast4;
+    }
+
+    public void setCardLast4(String cardLast4) {
+        this.cardLast4 = cardLast4;
+    }
+
+    public String getCardBrand() {
+        return cardBrand;
+    }
+
+    public void setCardBrand(String cardBrand) {
+        this.cardBrand = cardBrand;
     }
 }

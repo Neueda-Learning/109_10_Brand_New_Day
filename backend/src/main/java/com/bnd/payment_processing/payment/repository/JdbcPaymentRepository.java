@@ -41,10 +41,14 @@ public class JdbcPaymentRepository implements PaymentRepository {
             INSERT INTO payments
             (id, idempotency_key, source_account, destination_account, amount, currency,
              status, error_code, type, original_payment_id, payment_method, approval_status,
-             approved_by, approved_at, rejection_reason, created_at, updated_at)
+             approved_by, approved_at, rejection_reason, settlement_currency, fx_rate_to_inr,
+             settlement_amount_inr, requested_by, card_id, card_last4, card_brand,
+             created_at, updated_at)
             VALUES (:id, :idempotencyKey, :sourceAccount, :destinationAccount, :amount, :currency,
              :status, :errorCode, :type, :originalPaymentId, :paymentMethod, :approvalStatus,
-             :approvedBy, :approvedAt, :rejectionReason, :createdAt, :updatedAt)
+             :approvedBy, :approvedAt, :rejectionReason, :settlementCurrency, :fxRateToInr,
+             :settlementAmountInr, :requestedBy, :cardId, :cardLast4, :cardBrand,
+             :createdAt, :updatedAt)
             """;
 
         MapSqlParameterSource params = new MapSqlParameterSource()
@@ -68,6 +72,17 @@ public class JdbcPaymentRepository implements PaymentRepository {
                 .addValue("approvedBy", payment.getApprovedBy())
                 .addValue("approvedAt", payment.getApprovedAt() == null ? null : Timestamp.from(payment.getApprovedAt()))
                 .addValue("rejectionReason", payment.getRejectionReason())
+                // Added 2026-08-06 (bank-grade + multi-currency settle-in-INR hardening).
+                .addValue("settlementCurrency",
+                        payment.getSettlementCurrency() == null ? "INR" : payment.getSettlementCurrency())
+                .addValue("fxRateToInr",
+                        payment.getFxRateToInr() == null ? java.math.BigDecimal.ONE : payment.getFxRateToInr())
+                .addValue("settlementAmountInr",
+                        payment.getSettlementAmountInr() == null ? java.math.BigDecimal.ZERO : payment.getSettlementAmountInr())
+                .addValue("requestedBy", payment.getRequestedBy())
+                .addValue("cardId", payment.getCardId() == null ? null : payment.getCardId().toString())
+                .addValue("cardLast4", payment.getCardLast4())
+                .addValue("cardBrand", payment.getCardBrand())
                 .addValue("createdAt", Timestamp.from(payment.getCreatedAt()))
                 .addValue("updatedAt", Timestamp.from(payment.getUpdatedAt()));
 
@@ -256,6 +271,14 @@ public class JdbcPaymentRepository implements PaymentRepository {
         Timestamp approvedAt = rs.getTimestamp("approved_at");
         p.setApprovedAt(approvedAt == null ? null : approvedAt.toInstant());
         p.setRejectionReason(rs.getString("rejection_reason"));
+        p.setSettlementCurrency(rs.getString("settlement_currency"));
+        p.setFxRateToInr(rs.getBigDecimal("fx_rate_to_inr"));
+        p.setSettlementAmountInr(rs.getBigDecimal("settlement_amount_inr"));
+        p.setRequestedBy(rs.getString("requested_by"));
+        String cardId = rs.getString("card_id");
+        p.setCardId(cardId == null ? null : UUID.fromString(cardId));
+        p.setCardLast4(rs.getString("card_last4"));
+        p.setCardBrand(rs.getString("card_brand"));
         p.setCreatedAt(rs.getTimestamp("created_at").toInstant());
         p.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
         return p;
