@@ -34,19 +34,34 @@
     return { ok: response.ok, status: response.status, data: data };
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
-    AppMode.initThemeToggle(document.getElementById("theme-toggle"));
-    AppMode.initModeToggle(document.getElementById("mode-toggle"));
+    document.addEventListener("DOMContentLoaded", function () {
+      AppMode.initThemeToggle(document.getElementById("theme-toggle"));
 
-    document.getElementById("new-payment-form").addEventListener("submit", onCreatePayment);
-    document.getElementById("load-more-btn").addEventListener("click", function () {
-      currentPage += 1;
-      loadTransactions(currentPage, true);
+      document.getElementById("new-payment-form").addEventListener("submit", onCreatePayment);
+      document.getElementById("load-more-btn").addEventListener("click", function () {
+        currentPage += 1;
+        loadTransactions(currentPage, true);
+      });
+
+      // Search and filter event listeners - only apply filters when user interacts
+      var searchInput = document.getElementById("search-uuid");
+      var filterSelect = document.getElementById("filter-status");
+
+      if (searchInput) {
+        searchInput.addEventListener("input", function () {
+          applyFiltersAndDisplay();
+        });
+      }
+
+      if (filterSelect) {
+        filterSelect.addEventListener("change", function () {
+          applyFiltersAndDisplay();
+        });
+      }
+
+      loadInsights();
+      loadTransactions(0, false);
     });
-
-    loadInsights();
-    loadTransactions(0, false);
-  });
 
   // --- Create payment ---
 
@@ -75,13 +90,6 @@
     currentPage = 0;
     loadTransactions(0, false);
     loadInsights();
-
-    if (AppMode.getMode() === "demo") {
-      AppMode.autoAdvance(API_BASE, result.data.id, function () {
-        loadTransactions(0, false);
-        loadInsights();
-      });
-    }
   }
 
   // --- Insights (GET /api/payments/insights, spec.md Section 10.10) ---
@@ -100,34 +108,66 @@
     document.getElementById("insight-success-rate").textContent = Math.round((insights.successRate || 0) * 100) + "%";
   }
 
-  // --- Transaction list ---
+    // --- Transaction list ---
 
-  async function loadTransactions(page, append) {
-    var errorEl = document.getElementById("transactions-error");
-    errorEl.hidden = true;
+    async function loadTransactions(page, append) {
+      var errorEl = document.getElementById("transactions-error");
+      errorEl.hidden = true;
 
-    var result = await fetchJson(API_BASE + "?page=" + page + "&size=" + PAGE_SIZE);
-    if (!result.ok) {
-      errorEl.textContent = extractErrorMessage(result.data);
-      errorEl.hidden = false;
-      return;
+      var result = await fetchJson(API_BASE + "?page=" + page + "&size=" + PAGE_SIZE);
+      if (!result.ok) {
+        errorEl.textContent = extractErrorMessage(result.data);
+        errorEl.hidden = false;
+        return;
+      }
+
+      if (append) {
+        loadedPayments = loadedPayments.concat(result.data.content);
+      } else {
+        loadedPayments = result.data.content;
+      }
+
+      // Display all transactions first
+      displayAllTransactions();
+
+      var loadMoreBtn = document.getElementById("load-more-btn");
+      loadMoreBtn.hidden = loadedPayments.length >= result.data.totalElements;
     }
 
-    if (append) {
-      loadedPayments = loadedPayments.concat(result.data.content);
-    } else {
-      loadedPayments = result.data.content;
+    function displayAllTransactions() {
+      var listEl = document.getElementById("transactions-list");
+      listEl.innerHTML = "";
+      loadedPayments.forEach(function (payment) {
+        listEl.appendChild(renderTransactionItem(payment));
+      });
     }
 
-    var listEl = document.getElementById("transactions-list");
-    listEl.innerHTML = "";
-    loadedPayments.forEach(function (payment) {
-      listEl.appendChild(renderTransactionItem(payment));
-    });
+    function applyFiltersAndDisplay() {
+      var searchInput = document.getElementById("search-uuid");
+      var filterSelect = document.getElementById("filter-status");
 
-    var loadMoreBtn = document.getElementById("load-more-btn");
-    loadMoreBtn.hidden = loadedPayments.length >= result.data.totalElements;
-  }
+      var searchValue = (searchInput && searchInput.value) ? searchInput.value.trim().toLowerCase() : "";
+      var filterStatus = (filterSelect && filterSelect.value) ? filterSelect.value : "";
+
+      // If no filters applied, show all transactions
+      if (!searchValue && !filterStatus) {
+        displayAllTransactions();
+        return;
+      }
+
+      // Apply filters
+      var filteredPayments = loadedPayments.filter(function (payment) {
+        var matchesSearch = !searchValue || payment.id.toLowerCase().includes(searchValue);
+        var matchesStatus = !filterStatus || payment.status === filterStatus;
+        return matchesSearch && matchesStatus;
+      });
+
+      var listEl = document.getElementById("transactions-list");
+      listEl.innerHTML = "";
+      filteredPayments.forEach(function (payment) {
+        listEl.appendChild(renderTransactionItem(payment));
+      });
+    }
 
   function renderTransactionItem(payment) {
     var template = document.getElementById("transaction-item-template");
@@ -182,15 +222,11 @@
         : null
     );
 
-    var refundSection = detailEl.querySelector(".refund-section");
-    refundSection.innerHTML = "";
-    if (payment.type === "PAYMENT" && payment.status === "COMPLETED") {
-      renderRefundForm(payment, refundSection, detailEl);
-    }
-
-    if (AppMode.getMode() === "debug") {
-      renderDebugControls(payment, detailEl);
-    }
+     var refundSection = detailEl.querySelector(".refund-section");
+     refundSection.innerHTML = "";
+     if (payment.type === "PAYMENT" && payment.status === "COMPLETED") {
+       renderRefundForm(payment, refundSection, detailEl);
+     }
   }
 
   function renderRefundForm(payment, container, detailEl) {
@@ -219,60 +255,14 @@
         errorEl.hidden = false;
         return;
       }
-      container.innerHTML = '<div class="text-success small">Refund requested (' + result.data.approvalStatus + '). Awaiting business approval.</div>';
-      loadTransactions(0, false);
-
-      if (AppMode.getMode() === "demo") {
-        AppMode.autoAdvance(API_BASE, result.data.id, function () {
-          loadTransactions(0, false);
-          loadInsights();
-        });
-      }
+       container.innerHTML = '<div class="text-success small">Refund requested (' + result.data.approvalStatus + '). Awaiting business approval.</div>';
+       loadTransactions(0, false);
     });
 
-    container.appendChild(form);
-  }
+     container.appendChild(form);
+   }
 
-  /** Manual step options for debug mode, mirroring AppMode.autoAdvance's per-step bodies. */
-  function nextManualSteps(status) {
-    if (status === "CREATED") {
-      return [{ label: "Validate", body: {} }];
-    }
-    if (status === "VALIDATED") {
-      return [{ label: "Send", body: {} }];
-    }
-    if (status === "SENT") {
-      return [{ label: "Complete", body: { targetStatus: "COMPLETED" } }];
-    }
-    return [];
-  }
-
-  function renderDebugControls(payment, detailEl) {
-    var inspectorContainer = detailEl.querySelector(".inspector-container");
-    var steps = nextManualSteps(payment.status);
-    if (steps.length === 0) {
-      return;
-    }
-    var controls = document.createElement("div");
-    controls.className = "debug-controls d-flex gap-2 mb-2";
-    steps.forEach(function (step) {
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn btn-sm btn-outline-secondary";
-      btn.textContent = step.label;
-      btn.addEventListener("click", async function () {
-        var url = API_BASE + "/" + payment.id + "/process";
-        AppMode.logRequest(inspectorContainer, { method: "POST", url: url, body: step.body });
-        var result = await fetchJson(url, "POST", step.body);
-        AppMode.logResponse(inspectorContainer, { status: result.status, body: result.data });
-        loadTransactions(0, false);
-      });
-      controls.appendChild(btn);
-    });
-    inspectorContainer.parentNode.insertBefore(controls, inspectorContainer);
-  }
-
-  // --- Formatting helpers ---
+   // --- Formatting helpers ---
 
   function formatAmount(amount, currency) {
     var n = Number(amount) || 0;

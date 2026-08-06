@@ -96,3 +96,22 @@
   background-color: var(--color-primary);
   border-color: var(--color-primary);
 }
+
+.search-box {
+  border-color: var(--color-border);
+}
+
+.search-box:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 0.2rem rgba(237, 28, 36, 0.25);
+}
+
+#filter-status {
+  border-color: var(--color-border);
+}
+
+#filter-status:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 0.2rem rgba(237, 28, 36, 0.25);
+}
+
