@@ -65,18 +65,21 @@ filterForm.addEventListener("submit", function (event) {
   event.preventDefault();
   currentFilters = collectFilters();
   currentPage = 0;
+  loadInsights();
   loadPayments();
 });
 
 prevPageBtn.addEventListener("click", function () {
   if (currentPage > 0) {
     currentPage -= 1;
+    loadInsights();
     loadPayments();
   }
 });
 
 nextPageBtn.addEventListener("click", function () {
   currentPage += 1;
+  loadInsights();
   loadPayments();
 });
 
@@ -281,6 +284,7 @@ function submitApprovalAction(action, body) {
     })
     .then(function (updatedPayment) {
       loadDetail(updatedPayment);
+      loadInsights();
       loadPayments();
     })
     .catch(function (err) {
