@@ -48,10 +48,6 @@ function renderLifecycleTimeline(containerEl, historyEntries, options) {
 
     var transition = document.createElement("div");
     transition.className = "timeline-item-transition";
-    if (entry.fromStatus) {
-      transition.appendChild(makeStatusBadge(entry.fromStatus));
-      transition.appendChild(document.createTextNode(" \u2192 "));
-    }
     transition.appendChild(makeStatusBadge(entry.toStatus));
     item.appendChild(transition);
 
