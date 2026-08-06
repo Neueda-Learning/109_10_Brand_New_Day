@@ -89,20 +89,30 @@ Internal payment processing system with:
 - Refund approval workflow (business must approve/reject a refund before it can be
   processed to completion — added 2026-08-05, see Section 8.1 rule 6 and Section 9's
   updated M3 section)
-- Payment method tagging (extensible field, single supported value `BANK_TRANSFER` for
-  now — added 2026-08-05, see Section 7 and Section 9's updated M3 section)
+- Payment method tagging: `BANK_TRANSFER` and `CARD` (extensible field — `CARD` added
+  2026-08-06, see Section 7 and Section 9's updated M3 section)
 - Query/list APIs
 - Analytics/insights aggregate endpoint for the business dashboard (added 2026-08-05,
   see Section 9's updated M4 section and Section 10.10)
 - Shared lifecycle UI structure
+- **Bank-grade validation hardening (added 2026-08-06):** an `accounts` reference
+  registry (existence/status checks), a `cards` registry (PCI-safe, masked/tokenized
+  only), and `exchange_rates` seed data enabling multi-currency payments (`INR`/`USD`/
+  `EUR`) that always settle in INR at a fixed rate frozen at creation time. See Section 7
+  for the full schema and Section 10.1/10.7 for the request/error contract.
+- **Customer-side "payment gateway" checkout redesign (`frontend-user`, added
+  2026-08-06):** account/currency/card selection at checkout plus an animated
+  lifecycle-simulation processing overlay (auto-advance only — no Debug/manual-step UI
+  on the customer side, unlike the business `ops.html` app). See Section 14.1.
 
 Out of scope:
 - Real payment gateway integration
 - Authentication/authorization
 - External processor integrations
-- Multi-currency support — all payments are `INR` only for now. Multi-currency is a
-  possible future feature, not currently assigned to any module (M1-M4), and must not be
-  built or seeded until it is added to this spec with an owner.
+- (Superseded 2026-08-06 — see the bank-grade hardening bullet above and Section 7/10)
+  Multi-currency used to be out of scope; it is now implemented (`INR`/`USD`/`EUR`,
+  always settled in INR via fixed seeded FX rates). No live FX/processor calls exist —
+  rates are static seed data, not a real integration.
 
 ## 6. Tech Stack and Dependency Policy
 
@@ -144,24 +154,73 @@ Do not add:
 ## 7. Domain Model and Schema (Canonical and Intact)
 
 This schema is the baseline contract and must remain intact unless a reviewed amendment is made here first.
+Canonical source of truth is `backend/src/main/resources/schema.sql` — this block mirrors it.
 
 ```sql
+-- Added 2026-08-06 (bank-grade validation hardening): reference registry, not
+-- FK-linked from payments (source/destination_account stay free VARCHAR).
+accounts (
+  id               UUID PK,
+  account_number   VARCHAR UNIQUE,
+  customer_ref     VARCHAR,
+  display_name     VARCHAR,
+  account_type     VARCHAR,   -- CUSTOMER | BUSINESS
+  status           VARCHAR,   -- ACTIVE | BLOCKED | CLOSED
+  default_currency VARCHAR(3) DEFAULT 'INR',
+  created_at       TIMESTAMP,
+  updated_at       TIMESTAMP
+)
+
+-- Added 2026-08-06: PCI-safe demo card registry - never a full PAN/CVV column.
+cards (
+  id              UUID PK,
+  customer_ref    VARCHAR,
+  card_brand      VARCHAR,   -- VISA | MASTERCARD (demo only)
+  masked_pan      VARCHAR,   -- e.g. '**** **** **** 4242'
+  last4           CHAR(4),
+  expiry_month    TINYINT,
+  expiry_year     SMALLINT,
+  cardholder_name VARCHAR,
+  token_ref       VARCHAR UNIQUE,
+  status          VARCHAR,   -- ACTIVE | BLOCKED
+  created_at      TIMESTAMP
+)
+
+-- Added 2026-08-06: fixed/seeded FX rates, no live FX calls. Business always
+-- settles in INR.
+exchange_rates (
+  id           UUID PK,
+  currency     VARCHAR(3) UNIQUE,
+  rate_to_inr  DECIMAL(18,8),
+  effective_at TIMESTAMP,
+  source       VARCHAR DEFAULT 'SEEDED_FIXED_RATE'
+)
+
 payments (
   id                  UUID PK,
   idempotency_key     VARCHAR UNIQUE,
   source_account      VARCHAR,
   destination_account VARCHAR,
-  amount              DECIMAL(18,2),
-  currency            VARCHAR(3),  -- always "INR" for now, see Section 5
+  amount              DECIMAL(18,2),  -- in `currency`, not necessarily INR
+  currency            VARCHAR(3),     -- INR | USD | EUR (must exist in exchange_rates, added 2026-08-06)
   status              VARCHAR,     -- CREATED | VALIDATED | SENT | COMPLETED | FAILED
   error_code          VARCHAR NULL,
   type                VARCHAR,     -- PAYMENT | REFUND
   original_payment_id UUID NULL,   -- set when type = REFUND
-  payment_method      VARCHAR(20) NOT NULL DEFAULT 'BANK_TRANSFER',  -- added 2026-08-05
+  payment_method      VARCHAR(20) NOT NULL DEFAULT 'BANK_TRANSFER',  -- BANK_TRANSFER | CARD (CARD added 2026-08-06)
   approval_status     VARCHAR(20) NULL,  -- NULL | PENDING_APPROVAL | APPROVED | REJECTED, REFUND rows only (added 2026-08-05)
   approved_by         VARCHAR(64) NULL,  -- added 2026-08-05
   approved_at         TIMESTAMP NULL,    -- added 2026-08-05
   rejection_reason    VARCHAR(255) NULL, -- added 2026-08-05
+  -- Added 2026-08-06 (multi-currency, settle-in-INR): frozen at creation, never recomputed.
+  settlement_currency   VARCHAR(3) NOT NULL DEFAULT 'INR',
+  fx_rate_to_inr        DECIMAL(18,8) NOT NULL DEFAULT 1.00000000,
+  settlement_amount_inr DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  requested_by          VARCHAR(64) NULL,  -- initiating account/actor, added 2026-08-06
+  -- Added 2026-08-06: card snapshot, only set when payment_method = CARD.
+  card_id                UUID NULL,
+  card_last4             CHAR(4) NULL,
+  card_brand             VARCHAR(20) NULL,
   created_at          TIMESTAMP,
   updated_at          TIMESTAMP
 )
@@ -188,20 +247,33 @@ Schema invariants:
   only for `ORDER BY changed_at ASC, seq ASC` in `GET /api/payments/{id}/history` — since
   `changed_at` is second-precision, multiple transitions landing in the same second would
   otherwise sort non-deterministically/incorrectly. Never returned in any API response.
-- `amount` is stored with exactly 2 decimal places (rupees + paise). Reject/round-reject
+- `amount` is stored with exactly 2 decimal places, in whatever `currency` the payment was
+  made in (not necessarily INR — see the multi-currency note below). Reject/round-reject
   requests with more than 2 decimal places at validation time — never silently round.
 - `id` (and every other UUID column) is **always generated server-side**
   (`java.util.UUID.randomUUID()`), never accepted from the client. Clients only ever
   supply `idempotencyKey` as their own correlation value.
 - All `TIMESTAMP` columns are stored and returned in **UTC**. Frontend pages are
   responsible for any local-time display conversion; the API never converts timezones.
-- `payment_method` (added 2026-08-05): a single supported value today, `BANK_TRANSFER`;
-  the column exists so future methods (e.g. `CARD`/`UPI`/`WALLET`) can be added later
-  without a schema change. No per-method validation/behavior branching exists yet.
+- `payment_method` (added 2026-08-05, extended 2026-08-06): `BANK_TRANSFER` or `CARD`.
+  `CARD` payments require `cardId`/`cvv` on create (validated against the `cards`
+  registry; `cvv` is never persisted anywhere — checked transiently, then discarded) and
+  snapshot `card_id`/`card_last4`/`card_brand` onto the payment row so historical rows
+  stay intact even if the underlying card record changes later.
 - `approval_status`/`approved_by`/`approved_at`/`rejection_reason` (added 2026-08-05):
   only ever set on `type = REFUND` rows. Stays `NULL` for `type = PAYMENT` rows. Set to
   `PENDING_APPROVAL` at refund creation time; see Section 8.1 rule 6 for the full
   approval-gate rule and Section 9 (M3) for the owning endpoints.
+- **Multi-currency, settle-in-INR (added 2026-08-06):** `currency` must exist as a row in
+  `exchange_rates` (`INR`/`USD`/`EUR` seeded today) or the request is rejected with
+  `UnsupportedCurrencyException` (`400`). `settlement_currency`/`fx_rate_to_inr`/
+  `settlement_amount_inr` are computed once at creation time from the matching
+  `exchange_rates` row and frozen — they are never recomputed on later status
+  transitions, even if the seed rate changes later.
+- **Account validation (added 2026-08-06):** `source_account`/`destination_account` must
+  match an existing `accounts.account_number`; a missing account throws
+  `AccountNotFoundException` (`404`), a non-`ACTIVE` account throws
+  `AccountBlockedException` (`409`).
 
 ## 8. State and Transition Rules
 
@@ -702,12 +774,24 @@ Request (`CreatePaymentRequest`):
   "amount": 250.00,
   "currency": "INR",
   "paymentMethod": "BANK_TRANSFER",
-  "idempotencyKey": "client-generated-uuid-or-key"
+  "idempotencyKey": "client-generated-uuid-or-key",
+  "cardId": "cc9f44e1-...-uuid",
+  "cvv": "123"
 }
 ```
-- `paymentMethod` (added 2026-08-05): optional; defaults server-side to
-  `"BANK_TRANSFER"` if omitted. `"BANK_TRANSFER"` is the only supported value today
-  (Section 7).
+- `paymentMethod` (added 2026-08-05, extended 2026-08-06 with `CARD`): optional;
+  defaults server-side to `"BANK_TRANSFER"` if omitted. Supported values: `"BANK_TRANSFER"`,
+  `"CARD"` (Section 7).
+- `cardId`/`cvv` (added 2026-08-06): required only when `paymentMethod = "CARD"`.
+  Validated against the `cards` registry (`CardNotFoundException`/`404`,
+  `CardDeclinedException`/`409` on mismatch/blocked/expired card); `cvv` is checked
+  transiently and never persisted anywhere.
+- `currency` (extended 2026-08-06): must match a seeded `exchange_rates` row
+  (`INR`/`USD`/`EUR` today) or the request fails with `UnsupportedCurrencyException`
+  (`400`).
+- `sourceAccount`/`destinationAccount` (extended 2026-08-06): must match an existing,
+  `ACTIVE` row in the `accounts` registry (`AccountNotFoundException`/`404`,
+  `AccountBlockedException`/`409` otherwise).
 
 Response `201 Created` (new payment) or `200 OK` (duplicate `idempotencyKey`) — `PaymentResponse`:
 ```json
@@ -727,6 +811,11 @@ Response `201 Created` (new payment) or `200 OK` (duplicate `idempotencyKey`) �
   "approvedBy": null,
   "approvedAt": null,
   "rejectionReason": null,
+  "settlementCurrency": "INR",
+  "fxRateToInr": 1.00000000,
+  "settlementAmountInr": 250.00,
+  "cardLast4": null,
+  "cardBrand": null,
   "createdAt": "2026-08-04T10:00:00Z",
   "updatedAt": "2026-08-04T10:00:00Z"
 }
@@ -734,6 +823,10 @@ Response `201 Created` (new payment) or `200 OK` (duplicate `idempotencyKey`) �
 - `approvalStatus`/`approvedBy`/`approvedAt`/`rejectionReason` (added 2026-08-05): always
   `null` for `type = PAYMENT` rows; only meaningful for `type = REFUND` rows
   (Section 8.1 rule 6, Section 10.6/10.8/10.9).
+- `settlementCurrency`/`fxRateToInr`/`settlementAmountInr` (added 2026-08-06): frozen at
+  creation time from the seeded `exchange_rates` row matching `currency` (Section 7).
+- `cardLast4`/`cardBrand` (added 2026-08-06): populated only when `paymentMethod = "CARD"`,
+  snapshotted from the `cards` registry at creation time; otherwise `null`.
 
 ### 10.2 `GET /api/payments/{id}`
 
@@ -872,6 +965,12 @@ Response `201 Created` (new refund) or `200 OK` (duplicate `idempotencyKey`) —
 | `DuplicatePaymentException` | 200 (short-circuit, not an error) | — |
 | `InvalidRefundStateException` | 409 | `INVALID_REFUND_STATE` |
 | `RefundNotApprovedException` (added 2026-08-05) | 409 | `REFUND_NOT_APPROVED` |
+| `AccountNotFoundException` (added 2026-08-06) | 404 | `ACCOUNT_NOT_FOUND` |
+| `AccountBlockedException` (added 2026-08-06) | 409 | `ACCOUNT_BLOCKED` |
+| `UnsupportedCurrencyException` (added 2026-08-06) | 400 | `UNSUPPORTED_CURRENCY` |
+| `CardNotFoundException` (added 2026-08-06) | 404 | `CARD_NOT_FOUND` |
+| `CardDeclinedException` (added 2026-08-06) | 409 | `CARD_DECLINED` |
+| `SegregationOfDutiesException` (added 2026-08-06) | 409 | `SEGREGATION_OF_DUTIES_VIOLATION` |
 | Validation failure (Bean Validation, incl. bad query params / missing `errorCode`) | 400 | `VALIDATION_ERROR` |
 
 ### 10.8 `POST /api/payments/{id}/refund/approve` (added 2026-08-05)
@@ -1332,6 +1431,8 @@ history — keep entries short and factual.
 | 2026-08-04 | M3 (Idempotency, Errors, Refund) implemented: `PaymentServiceImpl.createRefund()` (account swap, cumulative refund-amount cap, refund-of-refund ban, non-`COMPLETED` rejection), idempotent `createPayment()` duplicate-key short-circuit, `JdbcPaymentRepository.sumRefundedAmount()`, full `GlobalExceptionHandler` implementation (404/409/400/500 incl. the 200-with-existing-payment duplicate short-circuit), and `detail.html`/`detail.js` refund UI. Added test-scope dependency `org.springframework.boot:spring-boot-webmvc-test` (Section 6.2) — required because Spring Boot 4.1.0 relocated `@WebMvcTest`/`@AutoConfigureMockMvc` out of `spring-boot-test-autoconfigure`; not part of the original whitelist but needed for `GlobalExceptionHandlerTest`. 16 unit/MockMvc tests passing (`PaymentServiceImplTest`, `GlobalExceptionHandlerTest`); `JdbcPaymentRepositoryTest` written, pending a live MySQL run. |
 | 2026-08-04 | M1/M2/M3 merged to `main` via PR #1/#3/#2 respectively. `main` briefly had a broken build after PR #3's stash-pop conflict resolution left literal `<<<<<<<`/`=======`/`>>>>>>>` markers in `JdbcPaymentRepository`/`JdbcPaymentStatusHistoryRepository`/`PaymentServiceImpl` plus a stale local `toResponse()` call; fixed on `main` by PR #4 (`hotfix/main-compile-fix`, commit `b0c5129`). M4 (`feature/m4-lifecycle-ui`) implemented `GET /api/payments` search/filter/pagination end-to-end (`JdbcPaymentRepository.search`/`countSearch`, `PaymentServiceImpl.searchPayments` with enum validation), `lifecycle-timeline.js`, `dashboard.html`/`dashboard.js`, `history.html`/`history.js`, plus unit tests for search/pagination/filtering/validation — but this branch had not yet merged `main`'s PR #4 hotfix. Merged `origin/main` into `feature/m4-lifecycle-ui`: one trivial import-only conflict in `JdbcPaymentRepository.java` (this branch's full search implementation vs. main's stub), resolved by keeping this branch's imports. Re-verified after merge: `mvn compile` succeeds, all 29 tests pass (`GlobalExceptionHandlerTest`, `JdbcPaymentRepositoryTest`, `PaymentServiceImplTest`). Corrected Section 2 dashboard above, which had been stale (still showing Phase 2 as `NOT_STARTED` for all modules despite merged, implemented, tested work) — spec updates had lagged actual progress. Remaining work: merge `feature/m4-lifecycle-ui` into `main` via PR, then Phase 3 end-to-end integration validation across all endpoints together. |
 | 2026-08-05 | v2.2: recorded the payment-method/refund-approval/insights/unified-business-frontend plan (Sections 4, 5, 7, 8.1 rule 6, 9 [M3/M4], 10.7-10.10, 11.2, 14.1-14.3, 15, 16) — **spec-only, no code changes yet**. Adds: `payment_method`/`approval_status`/`approved_by`/`approved_at`/`rejection_reason` columns; a refund approval gate (`POST /refund/approve`, `POST /refund/reject`, `RefundNotApprovedException`/`REFUND_NOT_APPROVED`); optional `idempotencyKey` on `RefundRequest` (reusing the existing idempotency short-circuit pattern); a documented concurrency fix for `createRefund()` (`SELECT ... FOR UPDATE` before the cumulative-amount check); a new `GET /api/payments/insights` analytics endpoint plus `paymentMethod`/`approvalStatus` search filters; a Bootstrap 5 + Bootstrap Icons CDN-only frontend exception (Section 4); a unified `ops.html`/`ops.js`/`ops.css` business frontend plan replacing `dashboard.html`/`audit.html`; HSBC-style light-default/dark-optional brand guidelines (Section 14.2); and a Debug/Demo mode toggle plan (`app-mode.js`, frontend-only, no backend change, Section 14.3). New branches recorded in Section 16: `feature/m3-refund-approval`, `feature/shared-dataset-v2`, `feature/m4-insights-api`, `feature/m4-business-ui`, with a recommended merge order. Section 2 dashboard annotated to show this scope as spec-approved/`NOT_STARTED`. Nothing in this entry has been implemented in code yet. |
+| 2026-08-06 | Bank-grade validation hardening implemented in code (schema/backend, ahead of this spec being updated at the time): new `accounts`/`cards`/`exchange_rates` tables (`schema.sql`); multi-currency support (`INR`/`USD`/`EUR`, always settled in INR via a frozen `settlement_currency`/`fx_rate_to_inr`/`settlement_amount_inr` snapshot); `CARD` payment method (`cardId`/`cvv` on create, never-persisted CVV, `card_id`/`card_last4`/`card_brand` snapshot); `requested_by` actor column; new exceptions `AccountNotFoundException`/`AccountBlockedException`/`UnsupportedCurrencyException`/`CardNotFoundException`/`CardDeclinedException`/`SegregationOfDutiesException` mapped in `GlobalExceptionHandler`. `product.md` (an unrelated, broader redesign proposal) was removed from the repo as out of scope for this project. |
+| 2026-08-06 | Docs sync: this spec (Sections 5, 7, 10.1, 10.7), `README.md`, and `info.md` updated to reflect the 2026-08-06 hardening actually already in code (previously undocumented here), and all `product.md` references removed/replaced. Started `feature/user-frontend-payment-gateway-redesign`: `frontend-user` checkout redesigned as a bank-grade "payment gateway" — `sourceAccount` restricted to Kishore's 2 seeded accounts (no auth in this system, Section 4), a currency select (`INR`/`USD`/`EUR`), a payment-method toggle (Bank Transfer/Card) revealing a card picker + CVV field (with a "never stored" notice), and a new animated processing overlay that auto-advances a payment's lifecycle immediately after checkout via `AppMode.autoAdvance()` (existing helper, previously unused by this page) rendered live through `lifecycle-timeline.js`. Deliberately **no Demo/Debug mode toggle or request/response inspector** on `frontend-user` — the customer-facing app always auto-advances (prod-grade UX); Debug mode remains business-side only (`ops.html`). Detail panel and receipt (view/download) extended to show settlement/FX amount and card brand/last4 where applicable. No existing endpoint, working feature, or other frontend page was removed or altered. |
 
 ## 19. Immediate Execution Checklist
 
