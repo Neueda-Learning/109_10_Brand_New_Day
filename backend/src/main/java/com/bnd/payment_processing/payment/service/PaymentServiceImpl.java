@@ -2,8 +2,6 @@ package com.bnd.payment_processing.payment.service;
 
 import com.bnd.payment_processing.common.exception.AccountBlockedException;
 import com.bnd.payment_processing.common.exception.AccountNotFoundException;
-import com.bnd.payment_processing.common.exception.CardDeclinedException;
-import com.bnd.payment_processing.common.exception.CardNotFoundException;
 import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
 import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
 import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
@@ -46,6 +44,7 @@ import java.time.YearMonth;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -112,33 +111,67 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     /**
-     * CARD-method validation (added 2026-08-06): resolves the card, checks it is
-     * ACTIVE and not expired, and validates the CVV against the fixed demo value.
-     * The cvv itself is never stored on the Payment/DB - it only ever exists as a
-     * local variable in this method call, discarded once validated.
+     * Non-throwing counterpart to the old creation-time CARD validation (removed
+     * 2026-08-06): a wrong CVV/blocked/expired card must NOT block payment creation
+     * anymore - same reasoning as the insufficient-funds and account-not-found fixes
+     * below. The CVV itself is still never persisted anywhere (matched against
+     * {@link #DEMO_CARD_CVV} right here and then discarded) - only the resulting
+     * decline *classification* (a plain errorCode string, no card/CVV data) is
+     * written onto the payment so it can be surfaced later when the lifecycle
+     * reaches the CREATED -> VALIDATED step. Populates whatever card snapshot fields
+     * are available onto {@code payment} even when the card will ultimately be
+     * declined, and returns the errorCode to record (or {@code null} if the card is fine).
      */
-    private Card validateCardForPayment(String cardId, String cvv) {
-        if (cardId == null || cardId.isBlank()) {
-            throw new IllegalArgumentException("cardId is required when paymentMethod is CARD");
-        }
+    private String validateCardForPaymentSoft(Payment payment, String cardId, String cvv) {
         Card card;
         try {
-            card = cardRepository.findById(UUID.fromString(cardId))
-                    .orElseThrow(() -> new CardNotFoundException(cardId));
+            card = cardRepository.findById(UUID.fromString(cardId)).orElse(null);
         } catch (IllegalArgumentException notUuid) {
-            throw new CardNotFoundException(cardId);
+            card = null;
         }
+        if (card == null) {
+            return "CARD_NOT_FOUND";
+        }
+        payment.setCardId(card.getId());
+        payment.setCardLast4(card.getLast4());
+        payment.setCardBrand(card.getCardBrand());
+
         if (card.getStatus() != CardStatus.ACTIVE) {
-            throw new CardDeclinedException("Card is blocked and cannot be used");
+            return "CARD_DECLINED";
         }
         YearMonth expiry = YearMonth.of(card.getExpiryYear(), card.getExpiryMonth());
         if (expiry.isBefore(YearMonth.now())) {
-            throw new CardDeclinedException("Card has expired");
+            return "CARD_DECLINED";
         }
         if (cvv == null || !cvv.matches("\\d{3,4}") || !cvv.equals(DEMO_CARD_CVV)) {
-            throw new CardDeclinedException("CVV verification failed");
+            return "CARD_DECLINED";
         }
-        return card;
+        return null;
+    }
+
+    /**
+     * Non-throwing account existence/status check (changed 2026-08-06, deferred from
+     * creation time - same reasoning as {@link #validateCardForPaymentSoft}): a typo'd
+     * or blocked account number must not block payment creation anymore. Returns the
+     * errorCode to record if either account is missing/blocked (source checked first),
+     * or {@code null} if both are fine. Used at the CREATED -> VALIDATED lifecycle step.
+     */
+    private String findAccountValidationError(String sourceAccount, String destinationAccount) {
+        Optional<Account> source = accountRepository.findByAccountNumber(sourceAccount);
+        if (source.isEmpty()) {
+            return "ACCOUNT_NOT_FOUND";
+        }
+        if (source.get().getStatus() != AccountStatus.ACTIVE) {
+            return "ACCOUNT_BLOCKED";
+        }
+        Optional<Account> destination = accountRepository.findByAccountNumber(destinationAccount);
+        if (destination.isEmpty()) {
+            return "ACCOUNT_NOT_FOUND";
+        }
+        if (destination.get().getStatus() != AccountStatus.ACTIVE) {
+            return "ACCOUNT_BLOCKED";
+        }
+        return null;
     }
 
     @Override
@@ -151,10 +184,12 @@ public class PaymentServiceImpl implements PaymentService {
             throw new IllegalArgumentException("sourceAccount and destinationAccount must be different");
         }
 
-        // Bank-grade account checks (added 2026-08-06): both accounts must exist and
-        // be ACTIVE before any payment row is written - see requireActiveAccount().
-        requireActiveAccount(request.getSourceAccount());
-        requireActiveAccount(request.getDestinationAccount());
+        // Account existence/active-status is intentionally NOT checked here (changed
+        // 2026-08-06, same reasoning as the solvency guard below): a typo'd or
+        // blocked account number must not block payment creation. The payment is
+        // always created and the accounts are re-checked at the CREATED -> VALIDATED
+        // lifecycle step in processTransition() below, which degrades that transition
+        // to FAILED/ACCOUNT_NOT_FOUND or FAILED/ACCOUNT_BLOCKED instead of throwing here.
 
         Instant now = Instant.now();
 
@@ -176,13 +211,21 @@ public class PaymentServiceImpl implements PaymentService {
                 : parseEnum(PaymentMethod.class, request.getPaymentMethod(), "paymentMethod");
         payment.setPaymentMethod(method);
 
-        // CARD-method validation (added 2026-08-06): card existence/status/expiry/CVV.
-        // cvv is read once here and never assigned to the Payment/persisted anywhere.
+        // CARD-method validation (changed 2026-08-06): a wrong CVV/blocked/expired
+        // card must not block payment creation either - same reasoning as above. The
+        // CVV is still verified right here and never persisted anywhere; only the
+        // resulting decline classification (a plain errorCode, no card/CVV data) is
+        // recorded on the payment so it can surface later at the CREATED -> VALIDATED
+        // step. cardId is still required up front - that's a request-shape error
+        // (missing field), not a "this card is bad" lifecycle failure.
         if (method == PaymentMethod.CARD) {
-            Card card = validateCardForPayment(request.getCardId(), request.getCvv());
-            payment.setCardId(card.getId());
-            payment.setCardLast4(card.getLast4());
-            payment.setCardBrand(card.getCardBrand());
+            if (request.getCardId() == null || request.getCardId().isBlank()) {
+                throw new IllegalArgumentException("cardId is required when paymentMethod is CARD");
+            }
+            String cardError = validateCardForPaymentSoft(payment, request.getCardId(), request.getCvv());
+            if (cardError != null) {
+                payment.setErrorCode(cardError);
+            }
         }
 
         // Multi-currency, settle-in-INR FX snapshot (added 2026-08-06) - frozen now,
@@ -258,6 +301,25 @@ public class PaymentServiceImpl implements PaymentService {
         String errorCode = null;
         if (nextStatus == PaymentStatus.FAILED) {
             errorCode = request.getErrorCode().trim();
+        }
+
+        // Bank-grade validation guards, deferred from creation time (changed
+        // 2026-08-06): a typo'd/blocked account number or a bad CARD (wrong CVV,
+        // blocked, expired) no longer reject the payment/refund at creation - they
+        // must always be allowed to enter the lifecycle and only get flagged/failed
+        // here, at the CREATED -> VALIDATED step, exactly like a real payment
+        // "sailing" through validation before being declined. Any CARD decline
+        // reason pre-flagged onto errorCode at creation time (never the raw CVV
+        // itself - see validateCardForPaymentSoft()) takes priority over the account
+        // check since it was already known at creation.
+        if (nextStatus == PaymentStatus.VALIDATED) {
+            String validationError = (current.getErrorCode() != null && !current.getErrorCode().isBlank())
+                    ? current.getErrorCode()
+                    : findAccountValidationError(current.getSourceAccount(), current.getDestinationAccount());
+            if (validationError != null) {
+                nextStatus = PaymentStatus.FAILED;
+                errorCode = validationError;
+            }
         }
 
         // Bank-grade settlement guards (added 2026-08-06 hotfix): a payment/refund

@@ -31,9 +31,34 @@ var detailModal = new bootstrap.Modal(detailModalEl);
 var timelineEl = document.getElementById("timeline");
 var approvalActions = document.getElementById("detail-approval-actions");
 var approvalError = document.getElementById("approval-error");
+var approvalProcessing = document.getElementById("approval-processing");
 
 // --- Theme toggle (Section 14.2) ---
 AppMode.initThemeToggle(document.getElementById("theme-toggle"));
+
+// --- Live dashboard refresh (added 2026-08-06): KPI cards + results table
+// re-poll every 15s so ops staff see a refund/payment's lifecycle progress
+// (and updated KPI counts) without manually re-clicking Search. Paused while
+// the detail modal is open so it never interrupts an in-progress
+// approve/reject + auto-advance flow or scrolls the table out from under the
+// user while they're reading it. ---
+var LIVE_REFRESH_MS = 15000;
+var isDetailModalOpen = false;
+
+detailModalEl.addEventListener("show.bs.modal", function () {
+  isDetailModalOpen = true;
+});
+detailModalEl.addEventListener("hidden.bs.modal", function () {
+  isDetailModalOpen = false;
+});
+
+setInterval(function () {
+  if (isDetailModalOpen) {
+    return;
+  }
+  loadInsights();
+  loadPayments();
+}, LIVE_REFRESH_MS);
 
 // --- KPI cards (Section 10.10) ---
 function loadInsights() {
@@ -226,19 +251,36 @@ function loadDetail(payment) {
   document.getElementById("detail-destination").textContent = payment.destinationAccount;
   document.getElementById("detail-amount").textContent = payment.amount;
   document.getElementById("detail-currency").textContent = payment.currency;
-  var statusEl = document.getElementById("detail-status");
-  statusEl.textContent = payment.status;
-  statusEl.className = "status-badge " + payment.status;
+  updateDetailStatusBadge(payment.status);
   document.getElementById("detail-type").textContent = payment.type;
 
   // Approve/Reject actions (Section 10.8/10.9) - only ever visible once the backend
   // actually returns type=REFUND + approvalStatus=PENDING_APPROVAL (feature/m3-refund-approval).
   var canActOnApproval = payment.type === "REFUND" && payment.approvalStatus === "PENDING_APPROVAL";
   approvalActions.hidden = !canActOnApproval;
+  setApprovalProcessing(false);
 
   loadHistory(payment.id, payment.approvalStatus);
 
   detailModal.show();
+}
+
+function updateDetailStatusBadge(status) {
+  var statusEl = document.getElementById("detail-status");
+  statusEl.textContent = status;
+  statusEl.className = "status-badge " + status;
+}
+
+// Toggles a "Processing..." state on the approval action area while a
+// refund is being auto-advanced through its lifecycle after approval
+// (added 2026-08-06 - fixes refunds getting stuck at CREATED/APPROVED
+// forever because nothing ever called POST /{id}/process for them).
+function setApprovalProcessing(isProcessing) {
+  var approveBtn = document.getElementById("approve-btn");
+  var rejectBtn = document.getElementById("reject-btn");
+  approveBtn.disabled = isProcessing;
+  rejectBtn.disabled = isProcessing;
+  approvalProcessing.hidden = !isProcessing;
 }
 
 function loadHistory(paymentId, approvalStatus) {
@@ -281,6 +323,7 @@ function getApproverName() {
 function submitApprovalAction(action, body) {
   approvalError.hidden = true;
   var url = PAYMENTS_API + "/" + encodeURIComponent(selectedPaymentId) + "/refund/" + action;
+  var advancingId = selectedPaymentId;
 
   fetch(url, {
     method: "POST",
@@ -299,11 +342,59 @@ function submitApprovalAction(action, body) {
       loadDetail(updatedPayment);
       loadInsights();
       loadPayments();
+
+      // Auto-check/validate and move the refund forward through its lifecycle
+      // once approved (CREATED -> VALIDATED -> SENT -> COMPLETED/FAILED) -
+      // approving alone used to leave it stuck at CREATED forever since
+      // nothing else ever called POST /{id}/process for it. A rejected
+      // refund is already terminal (FAILED via rejectRefund()), so it never
+      // needs auto-advance.
+      if (action === "approve") {
+        autoAdvanceRefund(advancingId);
+      }
     })
     .catch(function (err) {
       approvalError.textContent = err.message;
       approvalError.hidden = false;
     });
+}
+
+function autoAdvanceRefund(paymentId) {
+  setApprovalProcessing(true);
+
+  function onStep(updated) {
+    // Only touch the modal UI if it's still showing this same refund - the
+    // ops user may have navigated to a different row mid-advance.
+    if (selectedPaymentId === paymentId) {
+      updateDetailStatusBadge(updated.status);
+      loadHistory(updated.id, updated.approvalStatus);
+    }
+    // Keep the KPI cards/table live as the refund progresses, not just once
+    // it reaches a terminal state.
+    loadInsights();
+    loadPayments();
+
+    if (updated.status === "COMPLETED" || updated.status === "FAILED") {
+      if (selectedPaymentId === paymentId) {
+        setApprovalProcessing(false);
+        approvalActions.hidden = true;
+      }
+    }
+  }
+
+  function onError(errorData) {
+    if (selectedPaymentId === paymentId) {
+      setApprovalProcessing(false);
+      approvalError.textContent = (errorData && errorData.message)
+        ? "Auto-processing stopped: " + errorData.message
+        : "Auto-processing stopped unexpectedly.";
+      approvalError.hidden = false;
+    }
+    loadInsights();
+    loadPayments();
+  }
+
+  AppMode.autoAdvance(PAYMENTS_API, paymentId, onStep, onError);
 }
 
 loadInsights();

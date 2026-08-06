@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Operations Dashboard - Payment Processing</title>
+  <title>BND Bank Ops</title>
   <!-- Bootstrap 5 + Bootstrap Icons via CDN only (spec.md Section 4 exception, Section 14.1) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
@@ -13,7 +13,7 @@
 <body>
   <header class="app-header">
     <div class="container-fluid px-3 py-2 d-flex align-items-center justify-content-between">
-      <span class="brand"><i class="bi bi-graph-up-arrow"></i> Operations Dashboard</span>
+      <span class="brand"><i class="bi bi-graph-up-arrow"></i> BND Bank Ops</span>
       <div class="d-flex align-items-center gap-3">
         <div class="form-check form-switch m-0">
           <input class="form-check-input" type="checkbox" role="switch" id="theme-toggle">
@@ -182,6 +182,14 @@
               <div class="col-auto">
                 <button id="approve-btn" type="button" class="btn btn-outline-success btn-sm"><i class="bi bi-check-lg"></i> Approve</button>
                 <button id="reject-btn" type="button" class="btn btn-outline-danger btn-sm"><i class="bi bi-x-lg"></i> Reject</button>
+              </div>
+              <div class="col-auto">
+                <!-- Shown while an approved refund is auto-advancing through its
+                     lifecycle (CREATED -> VALIDATED -> SENT -> COMPLETED/FAILED). -->
+                <span id="approval-processing" class="text-muted small" hidden>
+                  <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                  Processing refund&hellip;
+                </span>
               </div>
             </div>
             <p id="approval-error" class="error-message" hidden></p>
