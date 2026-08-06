@@ -56,13 +56,6 @@ function renderLifecycleTimeline(containerEl, historyEntries, options) {
     meta.textContent = formatChangedAt(entry.changedAt) + " \u00B7 triggered by " + entry.triggeredBy;
     item.appendChild(meta);
 
-    if (entry.note) {
-      var note = document.createElement("div");
-      note.className = "timeline-item-note";
-      note.textContent = entry.note;
-      item.appendChild(note);
-    }
-
     list.appendChild(item);
   });
 
