@@ -1,5 +1,6 @@
 package com.bnd.payment_processing.payment.model;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -17,6 +18,7 @@ public class Account {
     private AccountType accountType;
     private AccountStatus status;
     private String defaultCurrency;
+    private BigDecimal balance;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -74,6 +76,14 @@ public class Account {
 
     public void setDefaultCurrency(String defaultCurrency) {
         this.defaultCurrency = defaultCurrency;
+    }
+
+    public BigDecimal getBalance() {
+        return balance;
+    }
+
+    public void setBalance(BigDecimal balance) {
+        this.balance = balance;
     }
 
     public Instant getCreatedAt() {

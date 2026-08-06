@@ -167,6 +167,7 @@ accounts (
   account_type     VARCHAR,   -- CUSTOMER | BUSINESS
   status           VARCHAR,   -- ACTIVE | BLOCKED | CLOSED
   default_currency VARCHAR(3) DEFAULT 'INR',
+  balance          DECIMAL(18,2) DEFAULT 0.00,  -- added 2026-08-06; adjusted only when a payment/refund reaches COMPLETED
   created_at       TIMESTAMP,
   updated_at       TIMESTAMP
 )
@@ -746,6 +747,9 @@ tested, independent of the rest of its module.
 | `/api/payments/{id}/refund/approve` | POST | M3 | Approve a pending refund (added 2026-08-05) | NOT_IMPLEMENTED |
 | `/api/payments/{id}/refund/reject` | POST | M3 | Reject a pending refund (added 2026-08-05) | NOT_IMPLEMENTED |
 | `/api/payments/insights` | GET | M4 | Aggregate analytics for business dashboard (added 2026-08-05) | NOT_IMPLEMENTED |
+| `/api/accounts` | GET | Shared | Universal: list a customer's accounts + live balance (added 2026-08-06, `?customerRef=`) | TESTED |
+| `/api/accounts/{accountNumber}` | GET | Shared | Universal: single account + live balance lookup (added 2026-08-06) | TESTED |
+| `/api/exchange-rates` | GET | Shared | Universal: list all fixed/seeded FX rates (added 2026-08-06) | TESTED |
 
 Endpoint status values: `NOT_IMPLEMENTED`, `IMPLEMENTED` (works, not yet tested),
 `TESTED` (has passing unit/repository tests per Section 15).
@@ -1047,6 +1051,31 @@ Response `200 OK` — `PaymentInsightsResponse`:
 - **Routing note:** this is a literal path segment and must not collide with
   `GET /api/payments/{id}` — see Section 9 (M4)'s routing note and Section 15's required
   test.
+
+### 10.11 `GET /api/accounts` / `GET /api/accounts/{accountNumber}` (added 2026-08-06)
+
+**What it does (plain English):** universal, read-only account lookup — works for
+**any** customer/account, not hardcoded to any specific demo identity. Powers the
+customer-side "My Accounts" balance display (`frontend-user`), which happens to call it
+with Kishore's `customerRef` since he's the only demo identity, but the endpoint itself
+is generic.
+
+- `GET /api/accounts?customerRef=CUS-KISHORE-001` → `200 OK`, array of `AccountResponse`
+  (`accountNumber`, `displayName`, `accountType`, `status`, `currency`, `balance`).
+- `GET /api/accounts/{accountNumber}` → `200 OK` single `AccountResponse`, or `404
+  ACCOUNT_NOT_FOUND`.
+- `balance` (added 2026-08-06, Section 7): a live running balance in `currency`
+  (`accounts.default_currency`), adjusted **only** when a payment/refund against that
+  account reaches `COMPLETED` (debit source, credit destination by the frozen
+  `settlementAmountInr`) — never on `CREATED`/`VALIDATED`/`SENT`/`FAILED`.
+
+### 10.12 `GET /api/exchange-rates` (added 2026-08-06)
+
+**What it does (plain English):** universal, read-only display of the fixed/seeded FX
+rates every payment settles against (Section 7) — no live FX calls.
+
+Response `200 OK` — array of `ExchangeRateResponse` (`currency`, `rateToInr`,
+`effectiveAt`), e.g. `[{"currency":"USD","rateToInr":95.2,...}]`.
 
 ## 11. Phase 1 — Backbone Setup (Now)
 
@@ -1433,6 +1462,8 @@ history — keep entries short and factual.
 | 2026-08-05 | v2.2: recorded the payment-method/refund-approval/insights/unified-business-frontend plan (Sections 4, 5, 7, 8.1 rule 6, 9 [M3/M4], 10.7-10.10, 11.2, 14.1-14.3, 15, 16) — **spec-only, no code changes yet**. Adds: `payment_method`/`approval_status`/`approved_by`/`approved_at`/`rejection_reason` columns; a refund approval gate (`POST /refund/approve`, `POST /refund/reject`, `RefundNotApprovedException`/`REFUND_NOT_APPROVED`); optional `idempotencyKey` on `RefundRequest` (reusing the existing idempotency short-circuit pattern); a documented concurrency fix for `createRefund()` (`SELECT ... FOR UPDATE` before the cumulative-amount check); a new `GET /api/payments/insights` analytics endpoint plus `paymentMethod`/`approvalStatus` search filters; a Bootstrap 5 + Bootstrap Icons CDN-only frontend exception (Section 4); a unified `ops.html`/`ops.js`/`ops.css` business frontend plan replacing `dashboard.html`/`audit.html`; HSBC-style light-default/dark-optional brand guidelines (Section 14.2); and a Debug/Demo mode toggle plan (`app-mode.js`, frontend-only, no backend change, Section 14.3). New branches recorded in Section 16: `feature/m3-refund-approval`, `feature/shared-dataset-v2`, `feature/m4-insights-api`, `feature/m4-business-ui`, with a recommended merge order. Section 2 dashboard annotated to show this scope as spec-approved/`NOT_STARTED`. Nothing in this entry has been implemented in code yet. |
 | 2026-08-06 | Bank-grade validation hardening implemented in code (schema/backend, ahead of this spec being updated at the time): new `accounts`/`cards`/`exchange_rates` tables (`schema.sql`); multi-currency support (`INR`/`USD`/`EUR`, always settled in INR via a frozen `settlement_currency`/`fx_rate_to_inr`/`settlement_amount_inr` snapshot); `CARD` payment method (`cardId`/`cvv` on create, never-persisted CVV, `card_id`/`card_last4`/`card_brand` snapshot); `requested_by` actor column; new exceptions `AccountNotFoundException`/`AccountBlockedException`/`UnsupportedCurrencyException`/`CardNotFoundException`/`CardDeclinedException`/`SegregationOfDutiesException` mapped in `GlobalExceptionHandler`. `product.md` (an unrelated, broader redesign proposal) was removed from the repo as out of scope for this project. |
 | 2026-08-06 | Docs sync: this spec (Sections 5, 7, 10.1, 10.7), `README.md`, and `info.md` updated to reflect the 2026-08-06 hardening actually already in code (previously undocumented here), and all `product.md` references removed/replaced. Started `feature/user-frontend-payment-gateway-redesign`: `frontend-user` checkout redesigned as a bank-grade "payment gateway" — `sourceAccount` restricted to Kishore's 2 seeded accounts (no auth in this system, Section 4), a currency select (`INR`/`USD`/`EUR`), a payment-method toggle (Bank Transfer/Card) revealing a card picker + CVV field (with a "never stored" notice), and a new animated processing overlay that auto-advances a payment's lifecycle immediately after checkout via `AppMode.autoAdvance()` (existing helper, previously unused by this page) rendered live through `lifecycle-timeline.js`. Deliberately **no Demo/Debug mode toggle or request/response inspector** on `frontend-user` — the customer-facing app always auto-advances (prod-grade UX); Debug mode remains business-side only (`ops.html`). Detail panel and receipt (view/download) extended to show settlement/FX amount and card brand/last4 where applicable. No existing endpoint, working feature, or other frontend page was removed or altered. |
+| 2026-08-06 | v2.5 (branch `feature/user-balances-kpi-transparency`): added `accounts.balance` (Section 7) plus two new **universal** read endpoints — `GET /api/accounts?customerRef=`/`GET /api/accounts/{accountNumber}` (Section 10.11) and `GET /api/exchange-rates` (Section 10.12) — neither hardcoded to any specific customer/account. `PaymentServiceImpl.processTransition()` now applies a real balance ledger effect (debit source, credit destination by the frozen `settlementAmountInr`) but **only** on the `-> COMPLETED` transition, never on intermediate/failed states. `frontend-user`: added a "My Accounts" live-balance strip and an "Exchange Rates" chip display; replaced the global `/insights`-driven KPI cards (irrelevant — mixed every customer's data) with client-side KPIs computed from Kishore's own transactions only (Total Payments, Total Sent (Completed), Refunds Requested, Success Rate); "Recent Transactions" now merges/dedupes `GET /api/payments` calls filtered to Kishore's 2 accounts instead of showing the global feed, and the stale `CANCELLED`/`REFUNDED` filter options (not real `PaymentStatus` values) were removed; the processing overlay now shows a plain-English "what's happening" description per lifecycle stage (validating accounts/currency/method, routing, settling, etc.), not just a bare status badge; added a "Confirm Payment" modal gate (with Cancel) between the checkout form and the actual `POST /api/payments` call; rebranded "PayBank" → "BND Bank" throughout. No existing endpoint or working feature removed. Same branch also added an `InsufficientFundsException`/409 `INSUFFICIENT_FUNDS` mapping and a fail-fast, point-in-time balance check in `createPayment()`/`createRefund()` (rejecting the request outright at creation time if the source account clearly couldn't afford it) alongside the pre-existing authoritative `debitIfSufficient()` re-check at settlement. |
+| 2026-08-06 | Removed the fail-fast, creation-time balance check added earlier the same day: a payment/refund must always be allowed to be `CREATED` regardless of the source account's balance — insufficient funds is a lifecycle/settlement-time concern, not a creation-time rejection, so customers should never see an "insufficient funds" error block the checkout form itself. `PaymentServiceImpl.createPayment()`/`createRefund()` no longer read `Account.balance` or throw `InsufficientFundsException` at creation; every payment/refund now always reaches `CREATED` and proceeds through its normal lifecycle. The **only** insufficient-funds guard remaining is the pre-existing authoritative, race-safe `accountRepository.debitIfSufficient()` atomic re-check inside `processTransition()` at the `SENT -> COMPLETED` transition, which degrades the transition to `FAILED`/`errorCode=INSUFFICIENT_FUNDS` (recorded as a normal `payment_status_history` row) instead of completing — exactly mirroring how a real payment "sails" through validation/routing/sending and is only ever declined at actual settlement. `InsufficientFundsException`/`GlobalExceptionHandler`'s 409 mapping are left in place (unused for now) in case a future feature needs them. |
 
 ## 19. Immediate Execution Checklist
 

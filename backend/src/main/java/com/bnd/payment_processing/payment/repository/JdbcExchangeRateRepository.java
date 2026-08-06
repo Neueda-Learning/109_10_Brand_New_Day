@@ -28,6 +28,11 @@ public class JdbcExchangeRateRepository implements ExchangeRateRepository {
         return results.stream().findFirst();
     }
 
+    @Override
+    public List<ExchangeRate> findAll() {
+        return jdbcTemplate.query("SELECT * FROM exchange_rates ORDER BY currency", this::mapRow);
+    }
+
     private ExchangeRate mapRow(ResultSet rs, int rowNum) throws SQLException {
         ExchangeRate e = new ExchangeRate();
         e.setId(UUID.fromString(rs.getString("id")));

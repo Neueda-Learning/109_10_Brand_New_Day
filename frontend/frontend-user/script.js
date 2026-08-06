@@ -1,29 +1,51 @@
 /*
  * frontend-user/script.js - unified single-page consumer "payment gateway"
- * app (v2.3 redesign, bank-grade checkout). Replaces the old index.js +
- * detail.js + history.js.
+ * app (v2.4 redesign: balances, live KPIs, Kishore-only history, stage
+ * transparency, confirm-payment gate, exchange rates). Replaces the old
+ * index.js + detail.js + history.js.
  *
  * Responsibilities:
- *   - Checkout: create a new PAYMENT via POST /api/payments (bank transfer or
+ *   - Checkout: Confirm-Payment gate -> POST /api/payments (bank transfer or
  *     card, INR/USD/EUR - spec.md Section 10.1), idempotencyKey auto-generated
  *     client-side via crypto.randomUUID().
  *   - Payment-gateway processing overlay: animates the lifecycle simulation
- *     (CREATED -> VALIDATED -> SENT -> COMPLETED/FAILED) right after checkout
- *     by auto-advancing via frontend-shared/app-mode.js's autoAdvance() helper
- *     over the real POST .../process endpoint - no debug/manual-step UI on the
- *     customer side, this app is always "prod grade" auto-advance only.
- *   - List recent transactions via GET /api/payments (paginated).
- *   - Expand a transaction inline to show full detail (incl. settlement/FX and
- *     card snapshot fields) + lifecycle timeline (frontend-shared/lifecycle-timeline.js)
- *     + refund action.
- *   - KPI insight cards via GET /api/payments/insights (spec.md Section 10.10).
+ *     (CREATED -> VALIDATED -> SENT -> COMPLETED/FAILED) right after checkout,
+ *     auto-advancing via frontend-shared/app-mode.js's autoAdvance() helper,
+ *     showing a plain-English "what's happening" description per stage - no
+ *     debug/manual-step UI on the customer side (prod-grade auto-advance only).
+ *   - "My Accounts" balances via the universal GET /api/accounts?customerRef=.
+ *   - Exchange rates via the universal GET /api/exchange-rates.
+ *   - Kishore-only recent transactions: merges filtered GET /api/payments calls
+ *     across his 2 accounts (source+destination), deduped/sorted client-side.
+ *   - KPI cards computed client-side from Kishore's own transactions only (not
+ *     the global /insights aggregate, which mixes every customer's data).
  *   - Light/dark theme via frontend-shared/app-mode.js (no mode/debug toggle here).
  */
 (function () {
-  var API_BASE = "http://localhost:8080/api/payments";
-  var PAGE_SIZE = 10;
-  var currentPage = 0;
-  var loadedPayments = [];
+  var PAYMENTS_API = "http://localhost:8080/api/payments";
+  var ACCOUNTS_API = "http://localhost:8080/api/accounts";
+  var EXCHANGE_RATES_API = "http://localhost:8080/api/exchange-rates";
+
+  // Kishore is the only signed-in identity in this demo (no auth - spec.md
+  // Section 4). These endpoints are universal/generic server-side; the
+  // frontend just happens to call them with Kishore's identity.
+  var CUSTOMER_REF = "CUS-KISHORE-001";
+  var MY_ACCOUNTS = ["ACC-KISHORE-SAV-001", "ACC-KISHORE-CUR-001"];
+  var VISIBLE_PAGE_SIZE = 10;
+
+  var allMyPayments = [];   // full merged/deduped/sorted list
+  var visibleCount = VISIBLE_PAGE_SIZE;
+
+  // Plain-English "what's happening" copy per lifecycle stage (shown in the
+  // processing overlay so the customer understands what's being checked/done,
+  // not just a bare status label).
+  var STAGE_COPY = {
+    CREATED: "Payment request received and recorded.",
+    VALIDATED: "Validating source/destination accounts, currency and payment method.",
+    SENT: "Routing your payment through BND's settlement network.",
+    COMPLETED: "Settlement confirmed - funds have been transferred.",
+    FAILED: "Payment could not be completed."
+  };
 
   // app-mode.js doesn't expose a fetchJson helper - wrap fetch() locally instead.
   async function fetchJson(url, method, body) {
@@ -42,55 +64,84 @@
     return { ok: response.ok, status: response.status, data: data };
   }
 
-    document.addEventListener("DOMContentLoaded", function () {
-      AppMode.initThemeToggle(document.getElementById("theme-toggle"));
+  document.addEventListener("DOMContentLoaded", function () {
+    AppMode.initThemeToggle(document.getElementById("theme-toggle"));
 
-      document.getElementById("new-payment-form").addEventListener("submit", onCreatePayment);
-      document.getElementById("load-more-btn").addEventListener("click", function () {
-        currentPage += 1;
-        loadTransactions(currentPage, true);
-      });
-
-      // Toggle the card fields (card select + CVV) based on the chosen payment method.
-      var methodRadios = document.querySelectorAll('input[name="paymentMethod"]');
-      var cardFields = document.getElementById("card-fields");
-      methodRadios.forEach(function (radio) {
-        radio.addEventListener("change", function () {
-          var isCard = document.getElementById("method-card").checked;
-          cardFields.hidden = !isCard;
-          document.getElementById("cardCvv").required = isCard;
-        });
-      });
-
-      // Search and filter event listeners - only apply filters when user interacts
-      var searchInput = document.getElementById("search-uuid");
-      var filterSelect = document.getElementById("filter-status");
-
-      if (searchInput) {
-        searchInput.addEventListener("input", function () {
-          applyFiltersAndDisplay();
-        });
-      }
-
-      if (filterSelect) {
-        filterSelect.addEventListener("change", function () {
-          applyFiltersAndDisplay();
-        });
-      }
-
-      loadInsights();
-      loadTransactions(0, false);
+    document.getElementById("new-payment-form").addEventListener("submit", onSubmitCheckoutForm);
+    document.getElementById("confirm-payment-btn").addEventListener("click", onConfirmPayment);
+    document.getElementById("load-more-btn").addEventListener("click", function () {
+      visibleCount += VISIBLE_PAGE_SIZE;
+      displayVisibleTransactions();
     });
 
-  // --- Create payment ---
+    // Toggle the card fields (card select + CVV) based on the chosen payment method.
+    var methodRadios = document.querySelectorAll('input[name="paymentMethod"]');
+    var cardFields = document.getElementById("card-fields");
+    methodRadios.forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        var isCard = document.getElementById("method-card").checked;
+        cardFields.hidden = !isCard;
+        document.getElementById("cardCvv").required = isCard;
+      });
+    });
 
-  async function onCreatePayment(event) {
+    // Search and filter event listeners - only apply filters when user interacts
+    var searchInput = document.getElementById("search-uuid");
+    var filterSelect = document.getElementById("filter-status");
+
+    if (searchInput) {
+      searchInput.addEventListener("input", function () {
+        displayVisibleTransactions();
+      });
+    }
+    if (filterSelect) {
+      filterSelect.addEventListener("change", function () {
+        displayVisibleTransactions();
+      });
+    }
+
+    loadAccounts();
+    loadExchangeRates();
+    loadMyTransactions();
+  });
+
+  // --- Confirm-payment gate ---
+
+  function onSubmitCheckoutForm(event) {
     event.preventDefault();
     var errorEl = document.getElementById("form-error");
     errorEl.hidden = true;
 
     var isCard = document.getElementById("method-card").checked;
+    var sourceAccount = document.getElementById("sourceAccount").value;
+    var destinationAccount = document.getElementById("destinationAccount").value.trim();
+    var amount = document.getElementById("amount").value;
+    var currency = document.getElementById("currency").value;
 
+    if (isCard && document.getElementById("cardCvv").value.trim().length < 3) {
+      errorEl.textContent = "Please enter your card's CVV.";
+      errorEl.hidden = false;
+      return;
+    }
+
+    var summaryEl = document.getElementById("confirm-payment-body");
+    summaryEl.innerHTML =
+      '<dl class="row mb-0">' +
+      '<dt class="col-5">From</dt><dd class="col-7">' + escapeHtml(sourceAccount) + '</dd>' +
+      '<dt class="col-5">To</dt><dd class="col-7">' + escapeHtml(destinationAccount) + '</dd>' +
+      '<dt class="col-5">Amount</dt><dd class="col-7">' + escapeHtml(currency) + ' ' + escapeHtml(amount) + '</dd>' +
+      '<dt class="col-5">Method</dt><dd class="col-7">' + (isCard ? "Card (VISA \u2022\u2022\u2022\u2022 4242)" : "Bank Transfer") + '</dd>' +
+      '</dl>';
+
+    var modalEl = document.getElementById("confirm-payment-modal");
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+
+  async function onConfirmPayment() {
+    var errorEl = document.getElementById("form-error");
+    errorEl.hidden = true;
+
+    var isCard = document.getElementById("method-card").checked;
     var body = {
       sourceAccount: document.getElementById("sourceAccount").value.trim(),
       destinationAccount: document.getElementById("destinationAccount").value.trim(),
@@ -99,13 +150,14 @@
       paymentMethod: isCard ? "CARD" : "BANK_TRANSFER",
       idempotencyKey: crypto.randomUUID()
     };
-
     if (isCard) {
       body.cardId = document.getElementById("cardSelect").value;
       body.cvv = document.getElementById("cardCvv").value.trim();
     }
 
-    var result = await fetchJson(API_BASE, "POST", body);
+    bootstrap.Modal.getInstance(document.getElementById("confirm-payment-modal")).hide();
+
+    var result = await fetchJson(PAYMENTS_API, "POST", body);
     if (!result.ok) {
       errorEl.textContent = extractErrorMessage(result.data);
       errorEl.hidden = false;
@@ -115,18 +167,16 @@
     document.getElementById("new-payment-form").reset();
     document.getElementById("currency").value = "INR";
     document.getElementById("card-fields").hidden = true;
-    currentPage = 0;
 
     startProcessingOverlay(result.data);
   }
 
-  // --- Payment-gateway processing overlay (lifecycle simulation) ---
+  // --- Payment-gateway processing overlay (lifecycle simulation, with per-stage copy) ---
 
   function startProcessingOverlay(payment) {
     var modalEl = document.getElementById("processing-modal");
     if (!modalEl || typeof bootstrap === "undefined") {
-      loadTransactions(0, false);
-      loadInsights();
+      refreshAll();
       return;
     }
 
@@ -137,13 +187,13 @@
     var doneBtn = document.getElementById("processing-done-btn");
 
     timelineEl.innerHTML = "";
-    subtitleEl.textContent = "Please don't close this window.";
+    subtitleEl.textContent = STAGE_COPY.CREATED;
     titleEl.textContent = "Processing your payment\u2026";
     spinnerEl.classList.remove("processing-spinner-done", "processing-spinner-failed");
     doneBtn.hidden = true;
 
-    var history = [{ fromStatus: null, toStatus: payment.status, changedAt: payment.createdAt, triggeredBy: "SYSTEM", note: null }];
-    renderLifecycleTimeline(timelineEl, history);
+    var history = [{ fromStatus: null, toStatus: payment.status, changedAt: payment.createdAt, triggeredBy: "SYSTEM", note: STAGE_COPY[payment.status] }];
+    renderStageTimeline(timelineEl, history);
 
     var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     modal.show();
@@ -154,19 +204,19 @@
         toStatus: updated.status,
         changedAt: updated.updatedAt,
         triggeredBy: "SYSTEM",
-        note: null
+        note: STAGE_COPY[updated.status]
       });
-      renderLifecycleTimeline(timelineEl, history);
+      renderStageTimeline(timelineEl, history);
+      subtitleEl.textContent = STAGE_COPY[updated.status] || "";
 
       if (updated.status === "COMPLETED") {
         spinnerEl.classList.add("processing-spinner-done");
         titleEl.textContent = "Payment successful";
-        subtitleEl.textContent = "Your payment has been completed.";
         doneBtn.hidden = false;
       } else if (updated.status === "FAILED") {
         spinnerEl.classList.add("processing-spinner-failed");
         titleEl.textContent = "Payment failed";
-        subtitleEl.textContent = updated.errorCode ? "Reason: " + updated.errorCode : "Something went wrong.";
+        subtitleEl.textContent = updated.errorCode ? "Reason: " + updated.errorCode : STAGE_COPY.FAILED;
         doneBtn.hidden = false;
       }
     }
@@ -180,91 +230,182 @@
 
     modalEl.addEventListener("hidden.bs.modal", function refresh() {
       modalEl.removeEventListener("hidden.bs.modal", refresh);
-      loadTransactions(0, false);
-      loadInsights();
+      refreshAll();
     });
 
-    AppMode.autoAdvance(API_BASE, payment.id, onStep, onError);
+    AppMode.autoAdvance(PAYMENTS_API, payment.id, onStep, onError);
   }
 
+  // Like renderLifecycleTimeline, but also shows the plain-English stage
+  // description as a sub-line under each status badge.
+  function renderStageTimeline(containerEl, history) {
+    renderLifecycleTimeline(containerEl, history);
+    var metas = containerEl.querySelectorAll(".timeline-step-content");
+    metas.forEach(function (contentEl, idx) {
+      if (history[idx] && history[idx].note && !contentEl.querySelector(".timeline-stage-copy")) {
+        var copy = document.createElement("div");
+        copy.className = "timeline-stage-copy small text-muted";
+        copy.textContent = history[idx].note;
+        contentEl.appendChild(copy);
+      }
+    });
+  }
 
+  function refreshAll() {
+    loadAccounts();
+    loadMyTransactions();
+  }
 
-  // --- Insights (GET /api/payments/insights, spec.md Section 10.10) ---
+  // --- My Accounts (universal GET /api/accounts?customerRef=) ---
+  // Balances are masked by default; clicking "View" reveals the real value for
+  // 10 seconds, then auto re-masks (each card independently).
+  var MASK_TEXT = "\u2022\u2022\u2022\u2022\u2022\u2022";
+  var REVEAL_MS = 10000;
 
-  async function loadInsights() {
-    var result = await fetchJson(API_BASE + "/insights");
-    if (!result.ok) {
+  async function loadAccounts() {
+    var result = await fetchJson(ACCOUNTS_API + "?customerRef=" + encodeURIComponent(CUSTOMER_REF));
+    var containerEl = document.getElementById("account-cards");
+    if (!result.ok || !Array.isArray(result.data)) {
       return;
     }
-    var insights = result.data;
-    var countByType = insights.countByType || {};
-    var amountByType = insights.amountByType || {};
-    document.getElementById("insight-total-payments").textContent = countByType.PAYMENT || 0;
-    document.getElementById("insight-total-amount").textContent = formatAmount(amountByType.PAYMENT || 0);
-    document.getElementById("insight-total-refunds").textContent = countByType.REFUND || 0;
-    document.getElementById("insight-success-rate").textContent = Math.round((insights.successRate || 0) * 100) + "%";
+    containerEl.innerHTML = "";
+    result.data.forEach(function (account) {
+      var col = document.createElement("div");
+      col.className = "col-6 col-md-3";
+      col.innerHTML =
+        '<div class="card account-card">' +
+        '<div class="account-label">' + escapeHtml(account.displayName) + '</div>' +
+        '<div class="account-number small text-muted">' + escapeHtml(account.accountNumber) + '</div>' +
+        '<div class="d-flex align-items-center justify-content-center gap-2 mt-1">' +
+        '<div class="account-balance">' + MASK_TEXT + '</div>' +
+        '<button type="button" class="btn btn-sm btn-link p-0 balance-toggle" title="View balance"><i class="bi bi-eye"></i></button>' +
+        '</div>' +
+        '</div>';
+
+      var balanceEl = col.querySelector(".account-balance");
+      var toggleBtn = col.querySelector(".balance-toggle");
+      var maskTimer = null;
+
+      toggleBtn.addEventListener("click", function () {
+        var isMasked = balanceEl.textContent === MASK_TEXT;
+        if (isMasked) {
+          balanceEl.textContent = formatAmount(account.balance, account.currency);
+          toggleBtn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+          clearTimeout(maskTimer);
+          maskTimer = setTimeout(function () {
+            balanceEl.textContent = MASK_TEXT;
+            toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
+          }, REVEAL_MS);
+        } else {
+          balanceEl.textContent = MASK_TEXT;
+          toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
+          clearTimeout(maskTimer);
+        }
+      });
+
+      containerEl.appendChild(col);
+    });
   }
 
-    // --- Transaction list ---
+  // --- Exchange rates (universal GET /api/exchange-rates) ---
 
-    async function loadTransactions(page, append) {
-      var errorEl = document.getElementById("transactions-error");
-      errorEl.hidden = true;
+  async function loadExchangeRates() {
+    var result = await fetchJson(EXCHANGE_RATES_API);
+    var listEl = document.getElementById("exchange-rates-list");
+    if (!result.ok || !Array.isArray(result.data)) {
+      return;
+    }
+    listEl.innerHTML = "";
+    result.data.forEach(function (rate) {
+      var chip = document.createElement("span");
+      chip.className = "exchange-rate-chip";
+      chip.textContent = "1 " + rate.currency + " = \u20B9" + Number(rate.rateToInr).toLocaleString(undefined, { maximumFractionDigits: 2 });
+      listEl.appendChild(chip);
+    });
+  }
 
-      var result = await fetchJson(API_BASE + "?page=" + page + "&size=" + PAGE_SIZE);
-      if (!result.ok) {
-        errorEl.textContent = extractErrorMessage(result.data);
-        errorEl.hidden = false;
-        return;
-      }
+  // --- Kishore-only transaction history (merged across his 2 accounts) ---
 
-      if (append) {
-        loadedPayments = loadedPayments.concat(result.data.content);
-      } else {
-        loadedPayments = result.data.content;
-      }
+  async function loadMyTransactions() {
+    var errorEl = document.getElementById("transactions-error");
+    errorEl.hidden = true;
 
-      // Display all transactions first
-      displayAllTransactions();
+    var requests = [];
+    MY_ACCOUNTS.forEach(function (acc) {
+      requests.push(fetchJson(PAYMENTS_API + "?sourceAccount=" + encodeURIComponent(acc) + "&size=100"));
+      requests.push(fetchJson(PAYMENTS_API + "?destinationAccount=" + encodeURIComponent(acc) + "&size=100"));
+    });
 
-      var loadMoreBtn = document.getElementById("load-more-btn");
-      loadMoreBtn.hidden = loadedPayments.length >= result.data.totalElements;
+    var results = await Promise.all(requests);
+    var failed = results.find(function (r) { return !r.ok; });
+    if (failed) {
+      errorEl.textContent = extractErrorMessage(failed.data);
+      errorEl.hidden = false;
+      return;
     }
 
-    function displayAllTransactions() {
-      var listEl = document.getElementById("transactions-list");
-      listEl.innerHTML = "";
-      loadedPayments.forEach(function (payment) {
-        listEl.appendChild(renderTransactionItem(payment));
+    var byId = new Map();
+    results.forEach(function (r) {
+      (r.data.content || []).forEach(function (p) {
+        byId.set(p.id, p);
       });
-    }
+    });
 
-    function applyFiltersAndDisplay() {
-      var searchInput = document.getElementById("search-uuid");
-      var filterSelect = document.getElementById("filter-status");
+    allMyPayments = Array.from(byId.values()).sort(function (a, b) {
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
 
-      var searchValue = (searchInput && searchInput.value) ? searchInput.value.trim().toLowerCase() : "";
-      var filterStatus = (filterSelect && filterSelect.value) ? filterSelect.value : "";
+    visibleCount = VISIBLE_PAGE_SIZE;
+    displayVisibleTransactions();
+    renderKpis();
+  }
 
-      // If no filters applied, show all transactions
-      if (!searchValue && !filterStatus) {
-        displayAllTransactions();
-        return;
-      }
+  function getFilteredPayments() {
+    var searchInput = document.getElementById("search-uuid");
+    var filterSelect = document.getElementById("filter-status");
+    var searchValue = (searchInput && searchInput.value) ? searchInput.value.trim().toLowerCase() : "";
+    var filterStatus = (filterSelect && filterSelect.value) ? filterSelect.value : "";
 
-      // Apply filters
-      var filteredPayments = loadedPayments.filter(function (payment) {
-        var matchesSearch = !searchValue || payment.id.toLowerCase().includes(searchValue);
-        var matchesStatus = !filterStatus || payment.status === filterStatus;
-        return matchesSearch && matchesStatus;
-      });
+    return allMyPayments.filter(function (payment) {
+      var matchesSearch = !searchValue || payment.id.toLowerCase().includes(searchValue);
+      var matchesStatus = !filterStatus || payment.status === filterStatus;
+      return matchesSearch && matchesStatus;
+    });
+  }
 
-      var listEl = document.getElementById("transactions-list");
-      listEl.innerHTML = "";
-      filteredPayments.forEach(function (payment) {
-        listEl.appendChild(renderTransactionItem(payment));
-      });
-    }
+  function displayVisibleTransactions() {
+    var filtered = getFilteredPayments();
+    var listEl = document.getElementById("transactions-list");
+    listEl.innerHTML = "";
+    filtered.slice(0, visibleCount).forEach(function (payment) {
+      listEl.appendChild(renderTransactionItem(payment));
+    });
+
+    var loadMoreBtn = document.getElementById("load-more-btn");
+    loadMoreBtn.hidden = visibleCount >= filtered.length;
+  }
+
+  // --- KPIs (computed client-side from Kishore's own transactions only) ---
+
+  function renderKpis() {
+    var payments = allMyPayments.filter(function (p) { return p.type === "PAYMENT"; });
+    var refunds = allMyPayments.filter(function (p) { return p.type === "REFUND"; });
+    var completed = payments.filter(function (p) { return p.status === "COMPLETED"; });
+    var failed = payments.filter(function (p) { return p.status === "FAILED"; });
+
+    var totalSentInr = completed.reduce(function (sum, p) {
+      return sum + (Number(p.settlementAmountInr) || 0);
+    }, 0);
+
+    var successRate = (completed.length + failed.length) > 0
+      ? Math.round((completed.length / (completed.length + failed.length)) * 100)
+      : 0;
+
+    document.getElementById("insight-total-payments").textContent = payments.length;
+    document.getElementById("insight-total-amount").textContent = formatAmount(totalSentInr, "INR");
+    document.getElementById("insight-total-refunds").textContent = refunds.length;
+    document.getElementById("insight-success-rate").textContent = successRate + "%";
+  }
 
   function renderTransactionItem(payment) {
     var template = document.getElementById("transaction-item-template");
@@ -317,7 +458,7 @@
         : "") + "<br>" +
       (payment.errorCode ? "Error: " + payment.errorCode + "<br>" : "");
 
-    var historyResult = await fetchJson(API_BASE + "/" + payment.id + "/history");
+    var historyResult = await fetchJson(PAYMENTS_API + "/" + payment.id + "/history");
     var timelineContainer = detailEl.querySelector(".timeline-container");
     renderLifecycleTimeline(
       timelineContainer,
@@ -327,15 +468,13 @@
         : null
     );
 
-     var refundSection = detailEl.querySelector(".refund-section");
-     refundSection.innerHTML = "";
-     if (payment.type === "PAYMENT" && payment.status === "COMPLETED") {
-       renderRefundForm(payment, refundSection);
-     } else if (payment.type === "PAYMENT" && payment.status === "REFUNDED") {
-       renderReceiptActions(payment, refundSection);
-     } else if (payment.type === "REFUND" && payment.status === "COMPLETED") {
-       renderReceiptActions(payment, refundSection);
-     }
+    var refundSection = detailEl.querySelector(".refund-section");
+    refundSection.innerHTML = "";
+    if (payment.type === "PAYMENT" && payment.status === "COMPLETED") {
+      renderRefundForm(payment, refundSection);
+    } else if (payment.type === "REFUND" && payment.status === "COMPLETED") {
+      renderReceiptActions(payment, refundSection);
+    }
   }
 
   function renderRefundForm(payment, container) {
@@ -359,7 +498,7 @@
       errorEl.hidden = true;
       var amount = parseFloat(form.querySelector(".refund-amount").value);
 
-      var result = await fetchJson(API_BASE + "/" + payment.id + "/refund", "POST", {
+      var result = await fetchJson(PAYMENTS_API + "/" + payment.id + "/refund", "POST", {
         amount: amount,
         idempotencyKey: crypto.randomUUID()
       });
@@ -368,12 +507,12 @@
         errorEl.hidden = false;
         return;
       }
-       container.innerHTML = '<div class="text-success small">Refund requested (' + result.data.approvalStatus + '). Awaiting business approval.</div>';
-       loadTransactions(0, false);
+      container.innerHTML = '<div class="text-success small">Refund requested (' + result.data.approvalStatus + '). Awaiting business approval.</div>';
+      loadMyTransactions();
     });
 
-     container.appendChild(form);
-   }
+    container.appendChild(form);
+  }
 
   function renderReceiptActions(payment, container) {
     var actionWrap = document.createElement("div");
@@ -441,7 +580,7 @@
     return "<!DOCTYPE html>" +
       "<html><head><meta charset=\"UTF-8\"><title>Payment Receipt</title>" +
       "<style>body{font-family:Arial,sans-serif;margin:24px;color:#222}h1{margin-bottom:16px}table{border-collapse:collapse;width:100%;max-width:760px}th,td{border:1px solid #ddd;padding:10px;text-align:left}th{width:220px;background:#f7f7f7}</style>" +
-      "</head><body><h1>Payment Receipt</h1><table>" + rows + "</table></body></html>";
+      "</head><body><h1>BND Bank Payment Receipt</h1><table>" + rows + "</table></body></html>";
   }
 
   function buildReceiptTableMarkup(payment) {
@@ -488,7 +627,7 @@
       .replace(/'/g, "&#39;");
   }
 
-   // --- Formatting helpers ---
+  // --- Formatting helpers ---
 
   function formatAmount(amount, currency) {
     var n = Number(amount) || 0;
@@ -507,3 +646,5 @@
     return data.message || data.error || JSON.stringify(data);
   }
 })();
+
+

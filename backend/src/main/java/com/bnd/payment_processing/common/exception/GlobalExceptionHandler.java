@@ -79,6 +79,12 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.CONFLICT, "SEGREGATION_OF_DUTIES_VIOLATION", ex.getMessage(), request);
     }
 
+    // Added 2026-08-06 hotfix (bank-grade solvency guard, previously missing entirely).
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ResponseEntity<ErrorResponse> handleInsufficientFunds(InsufficientFundsException ex, WebRequest request) {
+        return buildError(HttpStatus.CONFLICT, "INSUFFICIENT_FUNDS", ex.getMessage(), request);
+    }
+
     /**
      * Not a real error - a duplicate idempotency_key on POST /api/payments means
      * "return the original resource" (spec.md Section 10.7), so this bypasses the

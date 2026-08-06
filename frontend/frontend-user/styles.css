@@ -25,6 +25,58 @@
   text-align: center;
 }
 
+/* --- My Accounts balance cards --- */
+
+.account-card {
+  padding: var(--space-3);
+  text-align: center;
+  border-left: 3px solid var(--color-primary);
+}
+
+.account-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.account-number {
+  font-family: monospace;
+}
+
+.account-balance {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-primary);
+  letter-spacing: 1px;
+}
+
+.balance-toggle {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  line-height: 1;
+}
+
+.balance-toggle:hover {
+  color: var(--color-primary);
+}
+
+/* --- Exchange rates chips --- */
+
+.exchange-rate-chip {
+  background: var(--color-surface-alt, rgba(0,0,0,0.03));
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+/* --- Processing overlay per-stage description --- */
+
+.timeline-stage-copy {
+  margin-top: 2px;
+}
+
 .insight-label {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
