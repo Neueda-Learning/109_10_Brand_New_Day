@@ -63,6 +63,14 @@
   margin-top: var(--space-2);
 }
 
+.receipt-action-wrap {
+  margin-top: var(--space-2);
+}
+
+.receipt-action-group .btn {
+  white-space: nowrap;
+}
+
 .transaction-icon {
   font-size: 1.1rem;
   color: var(--color-primary);
