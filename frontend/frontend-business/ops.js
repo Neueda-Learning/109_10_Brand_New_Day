@@ -31,7 +31,6 @@ var timelineEl = document.getElementById("timeline");
 var approvalActions = document.getElementById("detail-approval-actions");
 var approvalError = document.getElementById("approval-error");
 var demoAdvanceBtn = document.getElementById("demo-advance-btn");
-var debugLogPanel = document.getElementById("debug-log-panel");
 
 // --- Theme toggle (Section 14.2) ---
 AppMode.initThemeToggle(document.getElementById("theme-toggle"));
@@ -267,8 +266,6 @@ function submitApprovalAction(action, body) {
   approvalError.hidden = true;
   var url = PAYMENTS_API + "/" + encodeURIComponent(selectedPaymentId) + "/refund/" + action;
 
-  AppMode.logRequest(debugLogPanel, { method: "POST", url: url, body: body });
-
   fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -276,7 +273,6 @@ function submitApprovalAction(action, body) {
   })
     .then(function (response) {
       return response.json().then(function (data) {
-        AppMode.logResponse(debugLogPanel, { status: response.status, body: data });
         if (!response.ok) {
           throw new Error(data.message || (action + " failed"));
         }
@@ -292,9 +288,6 @@ function submitApprovalAction(action, body) {
       approvalError.hidden = false;
     });
 }
-
-// Debug mode inspector panel visibility follows the mode toggle.
-debugLogPanel.hidden = AppMode.getMode() !== "debug";
 
 loadInsights();
 loadPayments();

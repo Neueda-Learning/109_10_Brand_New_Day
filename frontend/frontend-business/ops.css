@@ -72,26 +72,4 @@
   text-align: right;
 }
 
-.debug-log-panel {
-  margin-top: var(--space-3);
-  max-height: 260px;
-  overflow-y: auto;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-2);
-  background: var(--color-bg);
-}
 
-.debug-log-entry {
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-1);
-}
-
-.debug-log-entry pre {
-  white-space: pre-wrap;
-  word-break: break-all;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-2);
-}
