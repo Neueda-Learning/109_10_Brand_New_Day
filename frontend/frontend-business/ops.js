@@ -135,7 +135,7 @@ function renderResults(result) {
     row.appendChild(makeCell(payment.type));
     // paymentMethod/approvalStatus (added 2026-08-05) - not yet on PaymentResponse; renders "—" until then.
     row.appendChild(makeCell(payment.paymentMethod || "—"));
-    row.appendChild(makeCell(payment.approvalStatus || "—"));
+    row.appendChild(makeCell(approvalLabel(payment)));
     row.appendChild(makeCell(new Date(payment.createdAt).toLocaleString()));
 
     var actionCell = document.createElement("td");
@@ -163,6 +163,23 @@ function makeCell(text) {
   var cell = document.createElement("td");
   cell.textContent = text;
   return cell;
+}
+
+// Derives the Approval column label for REFUND rows from approvalStatus + status,
+// since approving a refund only flips approvalStatus - the payment still has to be
+// processed (CREATED -> VALIDATED -> SENT -> COMPLETED) to actually finish.
+function approvalLabel(payment) {
+  if (payment.type !== "REFUND" || !payment.approvalStatus) {
+    return "—";
+  }
+  if (payment.approvalStatus === "REJECTED" || payment.status === "FAILED") {
+    return "Rejected";
+  }
+  if (payment.approvalStatus === "PENDING_APPROVAL") {
+    return "Pending";
+  }
+  // approvalStatus === "APPROVED" from here on.
+  return payment.status === "COMPLETED" ? "Approved" : "In Progress";
 }
 
 function showError(message) {
