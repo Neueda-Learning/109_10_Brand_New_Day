@@ -1,10 +1,16 @@
 package com.bnd.payment_processing.payment.service;
 
+import com.bnd.payment_processing.common.exception.AccountBlockedException;
+import com.bnd.payment_processing.common.exception.AccountNotFoundException;
+import com.bnd.payment_processing.common.exception.CardDeclinedException;
+import com.bnd.payment_processing.common.exception.CardNotFoundException;
 import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
 import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
 import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
 import com.bnd.payment_processing.common.exception.PaymentNotFoundException;
 import com.bnd.payment_processing.common.exception.RefundNotApprovedException;
+import com.bnd.payment_processing.common.exception.SegregationOfDutiesException;
+import com.bnd.payment_processing.common.exception.UnsupportedCurrencyException;
 import com.bnd.payment_processing.payment.dto.ApproveRefundRequest;
 import com.bnd.payment_processing.payment.dto.CreatePaymentRequest;
 import com.bnd.payment_processing.payment.dto.PaymentHistoryEntry;
@@ -13,12 +19,20 @@ import com.bnd.payment_processing.payment.dto.PaymentResponse;
 import com.bnd.payment_processing.payment.dto.ProcessRequest;
 import com.bnd.payment_processing.payment.dto.RefundRequest;
 import com.bnd.payment_processing.payment.dto.RejectRefundRequest;
+import com.bnd.payment_processing.payment.model.Account;
+import com.bnd.payment_processing.payment.model.AccountStatus;
 import com.bnd.payment_processing.payment.model.ApprovalStatus;
+import com.bnd.payment_processing.payment.model.Card;
+import com.bnd.payment_processing.payment.model.CardStatus;
+import com.bnd.payment_processing.payment.model.ExchangeRate;
 import com.bnd.payment_processing.payment.model.Payment;
 import com.bnd.payment_processing.payment.model.PaymentMethod;
 import com.bnd.payment_processing.payment.model.PaymentStatus;
 import com.bnd.payment_processing.payment.model.PaymentStatusHistory;
 import com.bnd.payment_processing.payment.model.PaymentType;
+import com.bnd.payment_processing.payment.repository.AccountRepository;
+import com.bnd.payment_processing.payment.repository.CardRepository;
+import com.bnd.payment_processing.payment.repository.ExchangeRateRepository;
 import com.bnd.payment_processing.payment.repository.PaymentRepository;
 import com.bnd.payment_processing.payment.repository.PaymentStatusHistoryRepository;
 import org.springframework.dao.DuplicateKeyException;
@@ -26,7 +40,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.YearMonth;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,13 +57,88 @@ public class PaymentServiceImpl implements PaymentService {
 
     private static final String SYSTEM_TRIGGER = "SYSTEM";
 
+    // Added 2026-08-06 (bank-grade CARD hardening): fixed demo CVV, never stored in
+    // the DB anywhere - the incoming request's cvv is compared to this constant and
+    // then discarded. Every seeded demo card uses this same CVV for simplicity.
+    private static final String DEMO_CARD_CVV = "123";
+
     private final PaymentRepository paymentRepository;
     private final PaymentStatusHistoryRepository paymentStatusHistoryRepository;
+    private final AccountRepository accountRepository;
+    private final ExchangeRateRepository exchangeRateRepository;
+    private final CardRepository cardRepository;
 
     public PaymentServiceImpl(PaymentRepository paymentRepository,
-                              PaymentStatusHistoryRepository paymentStatusHistoryRepository) {
+                              PaymentStatusHistoryRepository paymentStatusHistoryRepository,
+                              AccountRepository accountRepository,
+                              ExchangeRateRepository exchangeRateRepository,
+                              CardRepository cardRepository) {
         this.paymentRepository = paymentRepository;
         this.paymentStatusHistoryRepository = paymentStatusHistoryRepository;
+        this.accountRepository = accountRepository;
+        this.exchangeRateRepository = exchangeRateRepository;
+        this.cardRepository = cardRepository;
+    }
+
+    /**
+     * Account existence + status check (bank-grade validation, added 2026-08-06).
+     * Why: real core-banking systems reject a payment referencing an unknown or
+     * blocked/closed account before any money movement is simulated - this is the
+     * account-number-check equivalent that stands in for real authentication, which
+     * stays explicitly out of scope for this project.
+     */
+    private Account requireActiveAccount(String accountNumber) {
+        Account account = accountRepository.findByAccountNumber(accountNumber)
+                .orElseThrow(() -> new AccountNotFoundException(accountNumber));
+        if (account.getStatus() != AccountStatus.ACTIVE) {
+            throw new AccountBlockedException(accountNumber, account.getStatus().name());
+        }
+        return account;
+    }
+
+    /**
+     * FX snapshot (added 2026-08-06): looks up the fixed/seeded rate for the
+     * received currency and freezes it + the computed INR settlement amount onto
+     * the payment at creation time. Frozen means never recomputed by any later
+     * transition (process/refund) - a later rate change must not retroactively
+     * alter an already-created payment's settled value.
+     */
+    private void applySettlementSnapshot(Payment payment, String currency, BigDecimal amount) {
+        ExchangeRate rate = exchangeRateRepository.findByCurrency(currency)
+                .orElseThrow(() -> new UnsupportedCurrencyException(currency));
+        payment.setSettlementCurrency("INR");
+        payment.setFxRateToInr(rate.getRateToInr());
+        payment.setSettlementAmountInr(amount.multiply(rate.getRateToInr()).setScale(2, RoundingMode.HALF_UP));
+    }
+
+    /**
+     * CARD-method validation (added 2026-08-06): resolves the card, checks it is
+     * ACTIVE and not expired, and validates the CVV against the fixed demo value.
+     * The cvv itself is never stored on the Payment/DB - it only ever exists as a
+     * local variable in this method call, discarded once validated.
+     */
+    private Card validateCardForPayment(String cardId, String cvv) {
+        if (cardId == null || cardId.isBlank()) {
+            throw new IllegalArgumentException("cardId is required when paymentMethod is CARD");
+        }
+        Card card;
+        try {
+            card = cardRepository.findById(UUID.fromString(cardId))
+                    .orElseThrow(() -> new CardNotFoundException(cardId));
+        } catch (IllegalArgumentException notUuid) {
+            throw new CardNotFoundException(cardId);
+        }
+        if (card.getStatus() != CardStatus.ACTIVE) {
+            throw new CardDeclinedException("Card is blocked and cannot be used");
+        }
+        YearMonth expiry = YearMonth.of(card.getExpiryYear(), card.getExpiryMonth());
+        if (expiry.isBefore(YearMonth.now())) {
+            throw new CardDeclinedException("Card has expired");
+        }
+        if (cvv == null || !cvv.matches("\\d{3,4}") || !cvv.equals(DEMO_CARD_CVV)) {
+            throw new CardDeclinedException("CVV verification failed");
+        }
+        return card;
     }
 
     @Override
@@ -59,6 +150,11 @@ public class PaymentServiceImpl implements PaymentService {
         if (request.getSourceAccount().equals(request.getDestinationAccount())) {
             throw new IllegalArgumentException("sourceAccount and destinationAccount must be different");
         }
+
+        // Bank-grade account checks (added 2026-08-06): both accounts must exist and
+        // be ACTIVE before any payment row is written - see requireActiveAccount().
+        requireActiveAccount(request.getSourceAccount());
+        requireActiveAccount(request.getDestinationAccount());
 
         Instant now = Instant.now();
 
@@ -72,11 +168,27 @@ public class PaymentServiceImpl implements PaymentService {
         payment.setStatus(PaymentStatus.CREATED);
         payment.setType(PaymentType.PAYMENT);
         payment.setOriginalPaymentId(null);
+        payment.setRequestedBy(request.getSourceAccount());
         // paymentMethod (spec.md Section 10.1, v2.2): optional in the request, defaults
         // to BANK_TRANSFER server-side if omitted. Reuses the existing parseEnum() helper.
-        payment.setPaymentMethod(request.getPaymentMethod() == null || request.getPaymentMethod().isBlank()
+        PaymentMethod method = request.getPaymentMethod() == null || request.getPaymentMethod().isBlank()
                 ? PaymentMethod.BANK_TRANSFER
-                : parseEnum(PaymentMethod.class, request.getPaymentMethod(), "paymentMethod"));
+                : parseEnum(PaymentMethod.class, request.getPaymentMethod(), "paymentMethod");
+        payment.setPaymentMethod(method);
+
+        // CARD-method validation (added 2026-08-06): card existence/status/expiry/CVV.
+        // cvv is read once here and never assigned to the Payment/persisted anywhere.
+        if (method == PaymentMethod.CARD) {
+            Card card = validateCardForPayment(request.getCardId(), request.getCvv());
+            payment.setCardId(card.getId());
+            payment.setCardLast4(card.getLast4());
+            payment.setCardBrand(card.getCardBrand());
+        }
+
+        // Multi-currency, settle-in-INR FX snapshot (added 2026-08-06) - frozen now,
+        // never recomputed later.
+        applySettlementSnapshot(payment, request.getCurrency(), request.getAmount());
+
         payment.setCreatedAt(now);
         payment.setUpdatedAt(now);
 
@@ -284,6 +396,12 @@ public class PaymentServiceImpl implements PaymentService {
                             + originalId + " (already refunded " + alreadyRefunded + " of " + original.getAmount() + ")");
         }
 
+        // Bank-grade re-check (added 2026-08-06): an account can be blocked between
+        // the original payment completing and the refund being requested - re-verify
+        // both accounts (swapped for the refund direction) are still ACTIVE.
+        requireActiveAccount(original.getDestinationAccount());
+        requireActiveAccount(original.getSourceAccount());
+
         Instant now = Instant.now();
         Payment refund = new Payment();
         refund.setId(UUID.randomUUID());
@@ -301,10 +419,20 @@ public class PaymentServiceImpl implements PaymentService {
         refund.setStatus(PaymentStatus.CREATED);
         refund.setType(PaymentType.REFUND);
         refund.setOriginalPaymentId(original.getId());
+        // Segregation-of-duties (added 2026-08-06): capture who requested this refund
+        // so approve/reject can reject a self-approval attempt.
+        refund.setRequestedBy(original.getDestinationAccount());
         // Approval gate (spec.md Section 8.1 rule 6, added 2026-08-05): every new refund
         // starts PENDING_APPROVAL and cannot advance past CREATED until approved.
         refund.setApprovalStatus(ApprovalStatus.PENDING_APPROVAL);
         refund.setPaymentMethod(original.getPaymentMethod() == null ? PaymentMethod.BANK_TRANSFER : original.getPaymentMethod());
+        // FX snapshot (added 2026-08-06): reuse the original payment's frozen rate
+        // rather than re-looking it up, so a refund always settles at the same rate
+        // the original payment did - never recomputed against a "current" rate.
+        refund.setSettlementCurrency("INR");
+        BigDecimal fxRate = original.getFxRateToInr() == null ? BigDecimal.ONE : original.getFxRateToInr();
+        refund.setFxRateToInr(fxRate);
+        refund.setSettlementAmountInr(request.getAmount().multiply(fxRate).setScale(2, RoundingMode.HALF_UP));
         refund.setCreatedAt(now);
         refund.setUpdatedAt(now);
 
@@ -358,6 +486,11 @@ public class PaymentServiceImpl implements PaymentService {
     public PaymentResponse rejectRefund(UUID refundId, RejectRefundRequest request) {
         Payment refund = paymentRepository.findById(refundId)
                 .orElseThrow(() -> new PaymentNotFoundException(refundId));
+
+        if (refund.getRequestedBy() != null && refund.getRequestedBy().equals(request.getRejectedBy())) {
+            throw new SegregationOfDutiesException(
+                    "rejectedBy cannot be the same account that requested refund " + refundId);
+        }
 
         // Conditional update (spec.md Section 10.9, added 2026-08-05): only applies when
         // type=REFUND and approval_status=PENDING_APPROVAL; also moves status straight to

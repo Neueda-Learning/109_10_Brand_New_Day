@@ -31,6 +31,11 @@ public final class PaymentMapper {
         response.setApprovedBy(payment.getApprovedBy());
         response.setApprovedAt(payment.getApprovedAt());
         response.setRejectionReason(payment.getRejectionReason());
+        response.setSettlementCurrency(payment.getSettlementCurrency());
+        response.setFxRateToInr(payment.getFxRateToInr());
+        response.setSettlementAmountInr(payment.getSettlementAmountInr());
+        response.setCardLast4(payment.getCardLast4());
+        response.setCardBrand(payment.getCardBrand());
         response.setCreatedAt(payment.getCreatedAt());
         response.setUpdatedAt(payment.getUpdatedAt());
         return response;

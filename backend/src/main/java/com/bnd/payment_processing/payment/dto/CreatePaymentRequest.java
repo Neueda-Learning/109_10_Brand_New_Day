@@ -36,6 +36,12 @@ public class CreatePaymentRequest {
     // to BANK_TRANSFER if omitted. "BANK_TRANSFER" is the only supported value today.
     private String paymentMethod;
 
+    // Added 2026-08-06 (CARD payment method, bank-grade hardening). Only required
+    // when paymentMethod = "CARD". cvv is NEVER persisted - validated transiently
+    // at creation time only, then discarded (see PaymentServiceImpl).
+    private String cardId;
+    private String cvv;
+
     public CreatePaymentRequest() {
     }
 
@@ -85,5 +91,21 @@ public class CreatePaymentRequest {
 
     public void setPaymentMethod(String paymentMethod) {
         this.paymentMethod = paymentMethod;
+    }
+
+    public String getCardId() {
+        return cardId;
+    }
+
+    public void setCardId(String cardId) {
+        this.cardId = cardId;
+    }
+
+    public String getCvv() {
+        return cvv;
+    }
+
+    public void setCvv(String cvv) {
+        this.cvv = cvv;
     }
 }
