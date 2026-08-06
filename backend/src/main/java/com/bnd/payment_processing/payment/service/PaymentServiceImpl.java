@@ -5,7 +5,6 @@ import com.bnd.payment_processing.common.exception.AccountNotFoundException;
 import com.bnd.payment_processing.common.exception.CardDeclinedException;
 import com.bnd.payment_processing.common.exception.CardNotFoundException;
 import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
-import com.bnd.payment_processing.common.exception.InsufficientFundsException;
 import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
 import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
 import com.bnd.payment_processing.common.exception.PaymentNotFoundException;
@@ -154,7 +153,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         // Bank-grade account checks (added 2026-08-06): both accounts must exist and
         // be ACTIVE before any payment row is written - see requireActiveAccount().
-        Account sourceAccountEntity = requireActiveAccount(request.getSourceAccount());
+        requireActiveAccount(request.getSourceAccount());
         requireActiveAccount(request.getDestinationAccount());
 
         Instant now = Instant.now();
@@ -190,18 +189,14 @@ public class PaymentServiceImpl implements PaymentService {
         // never recomputed later.
         applySettlementSnapshot(payment, request.getCurrency(), request.getAmount());
 
-        // Bank-grade solvency guard (added 2026-08-06 hotfix): fail fast at creation
-        // time if the source account clearly can't afford this payment. This is a
-        // best-effort, point-in-time check (sourceAccountEntity.balance was read
-        // before this request started) - the AUTHORITATIVE, race-safe check is the
-        // atomic debitIfSufficient() re-verification at settlement time in
-        // processTransition() below, which is what actually prevents a negative
-        // balance even under concurrent payments.
-        if (sourceAccountEntity.getBalance() != null
-                && sourceAccountEntity.getBalance().compareTo(payment.getSettlementAmountInr()) < 0) {
-            throw new InsufficientFundsException(
-                    request.getSourceAccount(), payment.getSettlementAmountInr(), sourceAccountEntity.getBalance());
-        }
+        // Solvency is intentionally NOT checked here (changed 2026-08-06): a payment
+        // must always be allowed to be CREATED regardless of balance - insufficient
+        // funds is a lifecycle/settlement-time concern, not a creation-time rejection.
+        // The payment gets created, moves through its normal CREATED -> VALIDATED ->
+        // ROUTED -> SENT lifecycle, and is only ever flagged/failed for insufficient
+        // funds at the authoritative, race-safe atomic debitIfSufficient() re-check in
+        // processTransition() below (the -> COMPLETED transition), which degrades the
+        // transition to FAILED/INSUFFICIENT_FUNDS instead of throwing at creation.
 
         payment.setCreatedAt(now);
         payment.setUpdatedAt(now);
@@ -449,7 +444,7 @@ public class PaymentServiceImpl implements PaymentService {
         // Bank-grade re-check (added 2026-08-06): an account can be blocked between
         // the original payment completing and the refund being requested - re-verify
         // both accounts (swapped for the refund direction) are still ACTIVE.
-        Account refundSourceEntity = requireActiveAccount(original.getDestinationAccount());
+        requireActiveAccount(original.getDestinationAccount());
         requireActiveAccount(original.getSourceAccount());
 
         Instant now = Instant.now();
@@ -486,15 +481,12 @@ public class PaymentServiceImpl implements PaymentService {
         refund.setCreatedAt(now);
         refund.setUpdatedAt(now);
 
-        // Bank-grade solvency guard (added 2026-08-06 hotfix): fail fast if the
-        // refunding account clearly can't afford it. Same caveat as createPayment()
-        // - this is best-effort/point-in-time; the authoritative atomic re-check is
-        // debitIfSufficient() in processTransition() at actual settlement time.
-        if (refundSourceEntity.getBalance() != null
-                && refundSourceEntity.getBalance().compareTo(refund.getSettlementAmountInr()) < 0) {
-            throw new InsufficientFundsException(
-                    refund.getSourceAccount(), refund.getSettlementAmountInr(), refundSourceEntity.getBalance());
-        }
+        // Solvency is intentionally NOT checked here (changed 2026-08-06): a refund
+        // must always be allowed to be CREATED regardless of balance - insufficient
+        // funds is a lifecycle/settlement-time concern (same reasoning as
+        // createPayment() above). The authoritative, race-safe check remains the
+        // atomic debitIfSufficient() re-check in processTransition() at actual
+        // settlement time, which degrades the transition to FAILED/INSUFFICIENT_FUNDS.
 
         // Refund idempotency (spec.md Section 10.6, added 2026-08-05): mirrors the same
         // duplicate-key-catch-and-refetch short-circuit pattern used by createPayment(),
