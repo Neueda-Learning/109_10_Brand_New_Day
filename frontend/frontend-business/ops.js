@@ -165,21 +165,26 @@ function makeCell(text) {
   return cell;
 }
 
-// Derives the Approval column label for REFUND rows from approvalStatus + status,
-// since approving a refund only flips approvalStatus - the payment still has to be
-// processed (CREATED -> VALIDATED -> SENT -> COMPLETED) to actually finish.
+// Derives the Approval column label for REFUND rows purely from status: Pending
+// while CREATED, In Progress while VALIDATED/SENT, Approved once COMPLETED,
+// Rejected once FAILED. Independent of approvalStatus so it always shows a value.
 function approvalLabel(payment) {
-  if (payment.type !== "REFUND" || !payment.approvalStatus) {
+  if (payment.type !== "REFUND") {
     return "—";
   }
-  if (payment.approvalStatus === "REJECTED" || payment.status === "FAILED") {
-    return "Rejected";
-  }
-  if (payment.approvalStatus === "PENDING_APPROVAL") {
+  if (payment.status === "CREATED") {
     return "Pending";
   }
-  // approvalStatus === "APPROVED" from here on.
-  return payment.status === "COMPLETED" ? "Approved" : "In Progress";
+  if (payment.status === "VALIDATED" || payment.status === "SENT") {
+    return "In Progress";
+  }
+  if (payment.status === "COMPLETED") {
+    return "Approved";
+  }
+  if (payment.status === "FAILED") {
+    return "Rejected";
+  }
+  return "—";
 }
 
 function showError(message) {
