@@ -12,6 +12,10 @@ on:
       - "frontend/**"
       - ".github/workflows/frontend-ci.yml"
 
+permissions:
+  contents: read
+  packages: write
+  
 jobs:
   build-push:
     runs-on: ubuntu-latest
