@@ -9,20 +9,29 @@ integration mechanics. Update alongside `spec.md` when things change.
 
 ## 1. Planned Features List
 
-- Create a payment (`CREATED` status, idempotent on `idempotencyKey`).
+- Create a payment (`CREATED` status, idempotent on `idempotencyKey`), via `BANK_TRANSFER`
+  or `CARD` (added 2026-08-06), in `INR`/`USD`/`EUR` (always settled in INR at a fixed
+  seeded FX rate — added 2026-08-06).
 - Fetch a payment by id.
-- List/search/filter payments (by status, type, source/destination account, date range) with pagination.
+- List/search/filter payments (by status, type, source/destination account, payment
+  method, approval status, date range) with pagination.
 - Full status-change audit trail (history timeline) per payment.
 - Advance a payment through its lifecycle one step at a time (`process` endpoint):
   `CREATED → VALIDATED → SENT → COMPLETED|FAILED`.
 - Refunds: create a `REFUND`-type payment against a `COMPLETED` original, capped at the
-  original amount cumulative across multiple partial refunds, no refund-of-refund.
-- Two frontends: end-customer app (`frontend-user`) and internal ops app (`frontend-business`).
+  original amount cumulative across multiple partial refunds, no refund-of-refund, gated
+  behind a business approve/reject workflow.
+- Bank-grade validation (added 2026-08-06): source/destination accounts must exist and be
+  `ACTIVE` in the `accounts` registry; `CARD` payments validate against the `cards`
+  registry (never persisting PAN/CVV); unsupported currencies are rejected.
+- Two frontends: end-customer "payment gateway" checkout app (`frontend-user`) and
+  internal ops app (`frontend-business`).
 - OpenAPI/Swagger docs auto-generated from the backend.
-- Local MySQL via Docker Compose, seeded with a realistic 491-payment / 1661-history-row dataset.
+- Local MySQL via Docker Compose, seeded with a realistic multi-week dataset incl.
+  Kishore's demo accounts/card and USD/EUR payments.
 
-Out of scope for now (see `spec.md` Section 5): multi-currency (`INR` only), auth/login,
-notifications, batch processing.
+Out of scope for now (see `spec.md` Section 5): real payment gateway/processor
+integration, authentication/authorization, notifications, batch processing.
 
 ## 2. Feature → Dev Mapping
 
@@ -40,9 +49,12 @@ Current phase: **Phase 2 (backend/frontend implementation) is DONE for M1-M4, me
 `main`**, including the refund approval workflow and the `/insights` aggregate endpoint.
 Both frontends were unified into single-page apps (`frontend-user/index.html`,
 `frontend-business/ops.html`) on 2026-08-05, replacing the original
-index/history/detail and dashboard/audit page split. See `spec.md` Section 2 for the
-live status dashboard — the project is about to start the product.md-driven Phase 3
-redesign (7-table schema, invoices, multi-currency, customers).
+index/history/detail and dashboard/audit page split. A 2026-08-06 bank-grade hardening
+pass added `accounts`/`cards`/`exchange_rates` tables, multi-currency (INR/USD/EUR,
+settled in INR) and a `CARD` payment method. `frontend-user` is now being redesigned as a
+bank-grade "payment gateway" checkout (Kishore-only account/card selection, animated
+lifecycle-simulation overlay, no debug/manual-step UI on the customer side) — see
+`spec.md` Section 2 for the live status dashboard.
 
 ## 3. REST Endpoints
 
@@ -74,12 +86,19 @@ files no longer exist in the repo).
 **`frontend-user/` (end-customer app) — `index.html` + `script.js` + `styles.css`:**
 - KPI insight cards (total payments, total amount, refunds, success rate) fed by
   `GET /api/payments/insights`.
-- "New Payment" form: source account, destination account, amount, currency (free-text,
-  defaults `INR`), idempotency key → submit → result card showing new payment id + status.
+- "New Payment" checkout form (bank-grade, Kishore-only demo identity — no auth/login):
+  from-account dropdown (Kishore's 2 seeded accounts), free-text destination account,
+  amount, currency select (`INR`/`USD`/`EUR`), payment method toggle (Bank Transfer /
+  Card — card option reveals a card picker + CVV field with a "never stored" notice) →
+  submit → an animated "processing" overlay auto-advances the new payment's lifecycle
+  (`CREATED → VALIDATED → SENT → COMPLETED`/`FAILED`) via repeated
+  `POST .../process` calls, rendered live with `frontend-shared/lifecycle-timeline.js`.
 - Expandable recent-transactions list with inline detail (status badge, lifecycle
-  timeline, refund action when `COMPLETED`).
-- Demo mode auto-advances the lifecycle; Debug mode exposes manual step buttons + a
-  request/response inspector (both via `frontend-shared/app-mode.js`).
+  timeline, settlement/FX amount when currency ≠ INR, card brand/last4 when paid by
+  card, refund action when `COMPLETED`).
+- Light/dark theme toggle via `frontend-shared/app-mode.js`. No Demo/Debug mode toggle
+  or request/response inspector on this app — the customer-facing checkout always
+  auto-advances (prod-grade UX); Debug mode remains business-side only (`ops.html`).
 
 **`frontend-business/` (internal ops app) — `ops.html` + `ops.js` + `ops.css`:**
 - KPI strip (total payments, total amount, success rate, refund rate, pending
@@ -103,6 +122,22 @@ files above are the working wireframes.
 
 Canonical source: `backend/src/main/resources/schema.sql` (mirrors `spec.md` Section 7).
 Applied automatically on every backend startup via `spring.sql.init.mode=always`.
+Extended 2026-08-06 with a bank-grade validation hardening pass: `accounts`/`cards`/
+`exchange_rates` reference tables plus new `payments` columns for multi-currency
+settlement and card snapshots.
+
+**`accounts`** — reference registry simulating a core-banking existence/status check
+(not FK-linked from `payments`): `id`, `account_number` (unique), `customer_ref`,
+`display_name`, `account_type` (`CUSTOMER`/`BUSINESS`), `status`
+(`ACTIVE`/`BLOCKED`/`CLOSED`), `default_currency`, `created_at`/`updated_at`.
+
+**`cards`** — PCI-safe demo card registry (no PAN/CVV columns, ever): `id`,
+`customer_ref`, `card_brand`, `masked_pan`, `last4`, `expiry_month`/`expiry_year`,
+`cardholder_name`, `token_ref` (unique), `status` (`ACTIVE`/`BLOCKED`), `created_at`.
+
+**`exchange_rates`** — fixed/seeded FX rates, no live FX calls: `id`, `currency`
+(unique), `rate_to_inr`, `effective_at`, `source`. Seeded with `INR` (1.0), `USD`
+(95.2), `EUR` (109.92).
 
 **`payments`**
 
@@ -112,12 +147,17 @@ Applied automatically on every backend startup via `spring.sql.init.mode=always`
 | idempotency_key | VARCHAR(255) UNIQUE | dedupe key for create |
 | source_account | VARCHAR(64) | |
 | destination_account | VARCHAR(64) | |
-| amount | DECIMAL(18,2) | |
-| currency | VARCHAR(3) | `INR` only for now |
+| amount | DECIMAL(18,2) | in `currency`, not necessarily INR |
+| currency | VARCHAR(3) | `INR`/`USD`/`EUR` (must exist in `exchange_rates`) |
 | status | VARCHAR(20) | `CREATED`/`VALIDATED`/`SENT`/`COMPLETED`/`FAILED` |
 | error_code | VARCHAR(64) NULL | set only when `FAILED` |
 | type | VARCHAR(10) | `PAYMENT` / `REFUND` |
 | original_payment_id | CHAR(36) NULL FK→payments.id | set only for `REFUND` rows |
+| payment_method | VARCHAR(20) | `BANK_TRANSFER` / `CARD` |
+| approval_status / approved_by / approved_at / rejection_reason | | `REFUND` rows only |
+| settlement_currency / fx_rate_to_inr / settlement_amount_inr | | frozen at creation, always settles in INR |
+| requested_by | VARCHAR(64) NULL | initiating account/actor |
+| card_id / card_last4 / card_brand | | snapshot, only set when `payment_method = CARD` |
 | created_at / updated_at | TIMESTAMP | UTC |
 
 Indexes: `status`, `type`, `source_account`, `destination_account`, `created_at`,
@@ -134,12 +174,13 @@ Indexes: `status`, `type`, `source_account`, `destination_account`, `created_at`
 | changed_at | TIMESTAMP | UTC |
 | triggered_by | VARCHAR(32) | e.g. `SYSTEM` |
 | note | VARCHAR(255) NULL | |
+| seq | BIGINT AUTO_INCREMENT UNIQUE | insertion-order tiebreaker, not exposed via API |
 
-Index: `(payment_id, changed_at)`.
+Index: `(payment_id, changed_at, seq)`.
 
-Seed data: `backend/src/main/resources/data.sql` — 491 `payments` rows / 1661
-`payment_status_history` rows, generated deterministically by
-`scripts/generate_data_sql.py` (one-time generator, not part of the build).
+Seed data: `backend/src/main/resources/data.sql` — deterministic, generated by
+`scripts/generate_data_sql.py` (one-time generator, not part of the build); includes
+Kishore's 2 accounts + 1 VISA card and USD/EUR multi-currency payments.
 
 ## 6. Git Repo + Owner + Collaborators
 

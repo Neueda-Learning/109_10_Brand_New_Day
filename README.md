@@ -43,8 +43,10 @@ docker-compose.yml   Local MySQL for development
 ### Status
 
 M1-M4 backend/frontend implementation is complete and merged to `main`, including the
-refund approval workflow and the `/insights` aggregate endpoint — see Section 2 and
-Section 18 of [spec.md](spec.md) for current module-by-module progress. The project is
-now starting the [product.md](product.md)-driven redesign (7-table schema, invoices,
-multi-currency, BND AI checkout/ops dashboard) — see `spec.md` for the live phase
-status once that rewrite lands.
+refund approval workflow and the `/insights` aggregate endpoint. A 2026-08-06 bank-grade
+hardening pass added an `accounts`/`cards`/`exchange_rates` reference schema, multi-currency
+support (INR/USD/EUR, always settled in INR), and a `CARD` payment method alongside
+`BANK_TRANSFER` — see `spec.md` Sections 5/7/10 for the full contract. The `frontend-user`
+checkout is being redesigned as a bank-grade "payment gateway" experience (account/currency/
+card selection, animated lifecycle-simulation overlay) — see Section 2 and Section 18 of
+[spec.md](spec.md) for current module-by-module progress.

@@ -1,15 +1,23 @@
 /*
- * frontend-user/script.js - unified single-page consumer app (v2.2 redesign,
- * spec.md Section 14.1). Replaces the old index.js + detail.js + history.js.
+ * frontend-user/script.js - unified single-page consumer "payment gateway"
+ * app (v2.3 redesign, bank-grade checkout). Replaces the old index.js +
+ * detail.js + history.js.
  *
  * Responsibilities:
- *   - Create a new PAYMENT via POST /api/payments (idempotencyKey auto-generated
- *     client-side via crypto.randomUUID(), no manual input field - spec 14.1).
+ *   - Checkout: create a new PAYMENT via POST /api/payments (bank transfer or
+ *     card, INR/USD/EUR - spec.md Section 10.1), idempotencyKey auto-generated
+ *     client-side via crypto.randomUUID().
+ *   - Payment-gateway processing overlay: animates the lifecycle simulation
+ *     (CREATED -> VALIDATED -> SENT -> COMPLETED/FAILED) right after checkout
+ *     by auto-advancing via frontend-shared/app-mode.js's autoAdvance() helper
+ *     over the real POST .../process endpoint - no debug/manual-step UI on the
+ *     customer side, this app is always "prod grade" auto-advance only.
  *   - List recent transactions via GET /api/payments (paginated).
- *   - Expand a transaction inline to show full detail + lifecycle timeline
- *     (frontend-shared/lifecycle-timeline.js) + refund action.
+ *   - Expand a transaction inline to show full detail (incl. settlement/FX and
+ *     card snapshot fields) + lifecycle timeline (frontend-shared/lifecycle-timeline.js)
+ *     + refund action.
  *   - KPI insight cards via GET /api/payments/insights (spec.md Section 10.10).
- *   - Demo/Debug mode + light/dark theme via frontend-shared/app-mode.js.
+ *   - Light/dark theme via frontend-shared/app-mode.js (no mode/debug toggle here).
  */
 (function () {
   var API_BASE = "http://localhost:8080/api/payments";
@@ -43,6 +51,17 @@
         loadTransactions(currentPage, true);
       });
 
+      // Toggle the card fields (card select + CVV) based on the chosen payment method.
+      var methodRadios = document.querySelectorAll('input[name="paymentMethod"]');
+      var cardFields = document.getElementById("card-fields");
+      methodRadios.forEach(function (radio) {
+        radio.addEventListener("change", function () {
+          var isCard = document.getElementById("method-card").checked;
+          cardFields.hidden = !isCard;
+          document.getElementById("cardCvv").required = isCard;
+        });
+      });
+
       // Search and filter event listeners - only apply filters when user interacts
       var searchInput = document.getElementById("search-uuid");
       var filterSelect = document.getElementById("filter-status");
@@ -70,13 +89,21 @@
     var errorEl = document.getElementById("form-error");
     errorEl.hidden = true;
 
+    var isCard = document.getElementById("method-card").checked;
+
     var body = {
       sourceAccount: document.getElementById("sourceAccount").value.trim(),
       destinationAccount: document.getElementById("destinationAccount").value.trim(),
       amount: parseFloat(document.getElementById("amount").value),
       currency: document.getElementById("currency").value.trim().toUpperCase(),
+      paymentMethod: isCard ? "CARD" : "BANK_TRANSFER",
       idempotencyKey: crypto.randomUUID()
     };
+
+    if (isCard) {
+      body.cardId = document.getElementById("cardSelect").value;
+      body.cvv = document.getElementById("cardCvv").value.trim();
+    }
 
     var result = await fetchJson(API_BASE, "POST", body);
     if (!result.ok) {
@@ -87,10 +114,80 @@
 
     document.getElementById("new-payment-form").reset();
     document.getElementById("currency").value = "INR";
+    document.getElementById("card-fields").hidden = true;
     currentPage = 0;
-    loadTransactions(0, false);
-    loadInsights();
+
+    startProcessingOverlay(result.data);
   }
+
+  // --- Payment-gateway processing overlay (lifecycle simulation) ---
+
+  function startProcessingOverlay(payment) {
+    var modalEl = document.getElementById("processing-modal");
+    if (!modalEl || typeof bootstrap === "undefined") {
+      loadTransactions(0, false);
+      loadInsights();
+      return;
+    }
+
+    var timelineEl = document.getElementById("processing-timeline");
+    var subtitleEl = document.getElementById("processing-modal-subtitle");
+    var titleEl = document.getElementById("processing-modal-title");
+    var spinnerEl = document.getElementById("processing-spinner");
+    var doneBtn = document.getElementById("processing-done-btn");
+
+    timelineEl.innerHTML = "";
+    subtitleEl.textContent = "Please don't close this window.";
+    titleEl.textContent = "Processing your payment\u2026";
+    spinnerEl.classList.remove("processing-spinner-done", "processing-spinner-failed");
+    doneBtn.hidden = true;
+
+    var history = [{ fromStatus: null, toStatus: payment.status, changedAt: payment.createdAt, triggeredBy: "SYSTEM", note: null }];
+    renderLifecycleTimeline(timelineEl, history);
+
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+
+    function onStep(updated) {
+      history.push({
+        fromStatus: history[history.length - 1].toStatus,
+        toStatus: updated.status,
+        changedAt: updated.updatedAt,
+        triggeredBy: "SYSTEM",
+        note: null
+      });
+      renderLifecycleTimeline(timelineEl, history);
+
+      if (updated.status === "COMPLETED") {
+        spinnerEl.classList.add("processing-spinner-done");
+        titleEl.textContent = "Payment successful";
+        subtitleEl.textContent = "Your payment has been completed.";
+        doneBtn.hidden = false;
+      } else if (updated.status === "FAILED") {
+        spinnerEl.classList.add("processing-spinner-failed");
+        titleEl.textContent = "Payment failed";
+        subtitleEl.textContent = updated.errorCode ? "Reason: " + updated.errorCode : "Something went wrong.";
+        doneBtn.hidden = false;
+      }
+    }
+
+    function onError() {
+      spinnerEl.classList.add("processing-spinner-failed");
+      titleEl.textContent = "Payment could not be processed";
+      subtitleEl.textContent = "Please check Recent Transactions for the latest status.";
+      doneBtn.hidden = false;
+    }
+
+    modalEl.addEventListener("hidden.bs.modal", function refresh() {
+      modalEl.removeEventListener("hidden.bs.modal", refresh);
+      loadTransactions(0, false);
+      loadInsights();
+    });
+
+    AppMode.autoAdvance(API_BASE, payment.id, onStep, onError);
+  }
+
+
 
   // --- Insights (GET /api/payments/insights, spec.md Section 10.10) ---
 
@@ -206,10 +303,18 @@
 
   async function populateDetail(payment, detailEl) {
     var fieldsEl = detailEl.querySelector(".detail-fields");
+    var isForeignCurrency = payment.currency && payment.currency !== "INR";
     fieldsEl.innerHTML =
       "Payment ID: " + payment.id + "<br>" +
       "Amount: " + formatAmount(payment.amount, payment.currency) + "<br>" +
-      "Payment Method: " + (payment.paymentMethod || "-") + "<br>" +
+      (isForeignCurrency
+        ? "Settled Amount: " + formatAmount(payment.settlementAmountInr, payment.settlementCurrency || "INR") +
+          " (rate " + payment.fxRateToInr + ")<br>"
+        : "") +
+      "Payment Method: " + (payment.paymentMethod || "-") +
+      (payment.paymentMethod === "CARD" && payment.cardLast4
+        ? " (" + (payment.cardBrand || "") + " \u2022\u2022\u2022\u2022 " + payment.cardLast4 + ")"
+        : "") + "<br>" +
       (payment.errorCode ? "Error: " + payment.errorCode + "<br>" : "");
 
     var historyResult = await fetchJson(API_BASE + "/" + payment.id + "/history");
@@ -346,6 +451,7 @@
 
   function buildReceiptRows(payment) {
     var now = new Date().toLocaleString();
+    var isForeignCurrency = payment.currency && payment.currency !== "INR";
     var fields = [
       ["Receipt Generated", now],
       ["Transaction ID", payment.id],
@@ -353,10 +459,20 @@
       ["Status", payment.status],
       ["Source Account", payment.sourceAccount],
       ["Destination Account", payment.destinationAccount],
-      ["Amount", formatAmount(payment.amount, payment.currency)],
-      ["Payment Method", payment.paymentMethod || "-"],
-      ["Created At", formatChangedAt(payment.createdAt)]
+      ["Amount", formatAmount(payment.amount, payment.currency)]
     ];
+
+    if (isForeignCurrency) {
+      fields.push(["Settlement (INR)", formatAmount(payment.settlementAmountInr, payment.settlementCurrency || "INR")]);
+      fields.push(["FX Rate to INR", String(payment.fxRateToInr)]);
+    }
+
+    fields.push(["Payment Method",
+      payment.paymentMethod === "CARD" && payment.cardLast4
+        ? payment.paymentMethod + " (" + (payment.cardBrand || "") + " \u2022\u2022\u2022\u2022 " + payment.cardLast4 + ")"
+        : (payment.paymentMethod || "-")
+    ]);
+    fields.push(["Created At", formatChangedAt(payment.createdAt)]);
 
     return fields.map(function (field) {
       return "<tr><th>" + escapeHtml(field[0]) + "</th><td>" + escapeHtml(field[1]) + "</td></tr>";

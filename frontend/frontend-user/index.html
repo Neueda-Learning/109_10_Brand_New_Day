@@ -62,22 +62,55 @@
         <form id="new-payment-form">
           <div class="row g-3">
             <div class="col-md-6">
-              <label for="sourceAccount" class="form-label">Source Account</label>
-              <input type="text" class="form-control" id="sourceAccount" required>
+              <label for="sourceAccount" class="form-label">From Account</label>
+              <select class="form-select" id="sourceAccount" required>
+                <option value="ACC-KISHORE-SAV-001">Kishore Savings &middot; ACC-KISHORE-SAV-001</option>
+                <option value="ACC-KISHORE-CUR-001">Kishore Current &middot; ACC-KISHORE-CUR-001</option>
+              </select>
             </div>
             <div class="col-md-6">
-              <label for="destinationAccount" class="form-label">Destination Account</label>
-              <input type="text" class="form-control" id="destinationAccount" required>
-            </div>
-            <div class="col-md-8">
-              <label for="amount" class="form-label">Amount (INR)</label>
-              <input type="number" class="form-control" id="amount" step="0.01" min="0.01" required>
+              <label for="destinationAccount" class="form-label">Pay To (Account Number)</label>
+              <input type="text" class="form-control" id="destinationAccount" placeholder="e.g. BND-INR-OPERATING-001" required>
             </div>
             <div class="col-md-4">
+              <label for="amount" class="form-label">Amount</label>
+              <input type="number" class="form-control" id="amount" step="0.01" min="0.01" required>
+            </div>
+            <div class="col-md-3">
               <label for="currency" class="form-label">Currency</label>
-              <input type="text" class="form-control" id="currency" value="INR" maxlength="3" required>
+              <select class="form-select" id="currency" required>
+                <option value="INR" selected>INR</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+              </select>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label d-block">Pay Using</label>
+              <div class="btn-group w-100" role="group" aria-label="Payment method" id="payment-method-group">
+                <input type="radio" class="btn-check" name="paymentMethod" id="method-bank" value="BANK_TRANSFER" checked>
+                <label class="btn btn-outline-primary" for="method-bank"><i class="bi bi-bank"></i> Bank Transfer</label>
+                <input type="radio" class="btn-check" name="paymentMethod" id="method-card" value="CARD">
+                <label class="btn btn-outline-primary" for="method-card"><i class="bi bi-credit-card"></i> Card</label>
+              </div>
             </div>
           </div>
+
+          <div id="card-fields" class="row g-3 mt-1" hidden>
+            <div class="col-md-6">
+              <label for="cardSelect" class="form-label">Card</label>
+              <select class="form-select" id="cardSelect">
+                <option value="cc9f44e1-b31c-568b-a03c-07e122f161ed">VISA &middot; **** **** **** 4242 (Kishore)</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label for="cardCvv" class="form-label">CVV</label>
+              <input type="password" class="form-control" id="cardCvv" maxlength="4" inputmode="numeric" placeholder="&bull;&bull;&bull;">
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+              <div class="cvv-note small text-muted"><i class="bi bi-shield-lock"></i> Your CVV is verified instantly and is never stored.</div>
+            </div>
+          </div>
+
           <div id="form-error" class="error-message mt-3" hidden></div>
           <button type="submit" class="btn btn-primary mt-3"><i class="bi bi-arrow-right-circle"></i> Pay</button>
         </form>
@@ -148,6 +181,24 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body" id="receipt-modal-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment gateway processing overlay: animates the lifecycle simulation
+       (CREATED -> VALIDATED -> SENT -> COMPLETED/FAILED) right after checkout. -->
+  <div class="modal fade" id="processing-modal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="processing-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content processing-modal-content">
+        <div class="modal-body text-center py-4">
+          <div class="processing-spinner mb-3" id="processing-spinner">
+            <i class="bi bi-arrow-repeat"></i>
+          </div>
+          <h5 class="modal-title mb-1" id="processing-modal-title">Processing your payment&hellip;</h5>
+          <p class="text-muted small mb-3" id="processing-modal-subtitle">Please don't close this window.</p>
+          <div class="timeline-container text-start" id="processing-timeline"></div>
+          <button type="button" class="btn btn-primary mt-3" id="processing-done-btn" hidden data-bs-dismiss="modal">Done</button>
+        </div>
       </div>
     </div>
   </div>

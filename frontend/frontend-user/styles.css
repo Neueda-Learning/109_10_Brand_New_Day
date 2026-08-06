@@ -123,3 +123,75 @@
   box-shadow: 0 0 0 0.2rem rgba(237, 28, 36, 0.25);
 }
 
+/* --- Payment method toggle + card fields (v2.3 checkout redesign) --- */
+
+#payment-method-group .btn-check:checked + .btn-outline-primary {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+#card-fields {
+  animation: fade-slide-up 200ms ease-in-out;
+}
+
+.cvv-note {
+  line-height: 1.3;
+}
+
+/* --- Payment-gateway processing overlay (lifecycle simulation) --- */
+
+.processing-modal-content {
+  border: none;
+  border-radius: var(--radius-lg, 0.75rem);
+}
+
+.processing-spinner {
+  font-size: 2.5rem;
+  color: var(--color-primary);
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+.processing-spinner.processing-spinner-done,
+.processing-spinner.processing-spinner-failed {
+  animation: none;
+}
+
+.processing-spinner.processing-spinner-done {
+  color: var(--color-success, #1e8e3e);
+}
+
+.processing-spinner.processing-spinner-done::before {
+  content: "\f26e"; /* bi-check-circle */
+  font-family: "bootstrap-icons";
+}
+
+.processing-spinner.processing-spinner-failed {
+  color: var(--color-danger, #d93025);
+}
+
+.processing-spinner.processing-spinner-failed::before {
+  content: "\f623"; /* bi-x-circle */
+  font-family: "bootstrap-icons";
+}
+
+#processing-timeline .timeline {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+#processing-timeline .timeline-item {
+  animation: fade-slide-up 250ms ease-in-out;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fade-slide-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
