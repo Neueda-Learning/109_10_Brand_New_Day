@@ -31,7 +31,6 @@ var detailModal = new bootstrap.Modal(detailModalEl);
 var timelineEl = document.getElementById("timeline");
 var approvalActions = document.getElementById("detail-approval-actions");
 var approvalError = document.getElementById("approval-error");
-var demoAdvanceBtn = document.getElementById("demo-advance-btn");
 
 // --- Theme toggle (Section 14.2) ---
 AppMode.initThemeToggle(document.getElementById("theme-toggle"));
@@ -196,10 +195,6 @@ function loadDetail(payment) {
   var canActOnApproval = payment.type === "REFUND" && payment.approvalStatus === "PENDING_APPROVAL";
   approvalActions.hidden = !canActOnApproval;
 
-  // Demo mode auto-advance (Section 14.3) - only offered for non-terminal payments.
-  var isTerminal = payment.status === "COMPLETED" || payment.status === "FAILED";
-  demoAdvanceBtn.hidden = isTerminal || AppMode.getMode() !== "demo";
-
   loadHistory(payment.id, payment.approvalStatus);
 
   detailModal.show();
@@ -224,30 +219,6 @@ function loadHistory(paymentId, approvalStatus) {
       timelineEl.appendChild(errEl);
     });
 }
-
-demoAdvanceBtn.addEventListener("click", function () {
-  if (!selectedPaymentId) {
-    return;
-  }
-  demoAdvanceBtn.disabled = true;
-  AppMode.autoAdvance(
-    PAYMENTS_API,
-    selectedPaymentId,
-    function (updatedPayment) {
-      loadHistory(updatedPayment.id, updatedPayment.approvalStatus);
-      if (updatedPayment.status === "COMPLETED" || updatedPayment.status === "FAILED") {
-        demoAdvanceBtn.disabled = false;
-        demoAdvanceBtn.hidden = true;
-        loadPayments();
-      }
-    },
-    function (errorBody) {
-      demoAdvanceBtn.disabled = false;
-      approvalError.textContent = "Auto-advance stopped: " + (errorBody.message || "unknown error");
-      approvalError.hidden = false;
-    }
-  );
-});
 
 // --- Refund approval actions (Section 10.8/10.9) ---
 document.getElementById("approve-btn").addEventListener("click", function () {
