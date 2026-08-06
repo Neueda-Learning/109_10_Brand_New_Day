@@ -19,6 +19,11 @@ CREATE TABLE accounts (
     account_type     VARCHAR(20)  NOT NULL,          -- CUSTOMER | BUSINESS
     status           VARCHAR(20)  NOT NULL,          -- ACTIVE | BLOCKED | CLOSED
     default_currency VARCHAR(3)   NOT NULL DEFAULT 'INR',
+    -- Added 2026-08-06 (customer balance display + live ledger effect): running
+    -- balance in `default_currency`. Adjusted atomically only when a payment/
+    -- refund reaches COMPLETED (never on CREATED/VALIDATED/SENT/FAILED) - see
+    -- PaymentServiceImpl's balance-effect logic.
+    balance          DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     created_at       TIMESTAMP    NOT NULL,
     updated_at       TIMESTAMP    NOT NULL
 );

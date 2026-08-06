@@ -6,23 +6,23 @@
 -- Kishore is the only customer with a seeded card (VISA, PCI-safe: masked +
 -- tokenized only, no PAN/CVV columns exist anywhere in this schema).
 
-INSERT INTO accounts (id, account_number, customer_ref, display_name, account_type, status, default_currency, created_at, updated_at) VALUES
-('aea7404c-1855-5578-90d7-fb391c76cc77', 'ACC-KISHORE-SAV-001', 'CUS-KISHORE-001', 'Kishore Savings', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('26fb62f8-b2b8-5cf2-aa8c-41146f07e273', 'ACC-KISHORE-CUR-001', 'CUS-KISHORE-001', 'Kishore Current', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('44e07227-7c21-5c6a-9037-4dcfe4201a0d', 'BND-INR-OPERATING-001', 'BND-BUSINESS', 'BND Operating Account', 'BUSINESS', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('21f142f2-0a2c-50c7-ac04-1df5413bcf63', 'ACC-1000', 'CUS-1000', 'Customer 1000', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('951ae6fb-e3ad-542c-98fb-cd984775b653', 'ACC-1001', 'CUS-1001', 'Customer 1001', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('ae35cbec-3095-5dbd-97c1-1d971c7c0fc2', 'ACC-1002', 'CUS-1002', 'Customer 1002', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('045b8d3f-71dd-5d13-b9ad-1b0f6b158ed5', 'ACC-1003', 'CUS-1003', 'Customer 1003', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('34fe314b-62e7-5ef3-bec2-8041a1fca9a8', 'ACC-1004', 'CUS-1004', 'Customer 1004', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('09b8555a-a503-57b6-bdbe-5645a194516e', 'ACC-1005', 'CUS-1005', 'Customer 1005', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('706a2b93-0429-5c92-881b-b40ff195e13e', 'ACC-1006', 'CUS-1006', 'Customer 1006', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('be0514b2-6609-5df6-a45e-29c647aaaeb0', 'ACC-1007', 'CUS-1007', 'Customer 1007', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('1196120b-8eed-5ec6-8fe4-214dc9800576', 'ACC-1008', 'CUS-1008', 'Customer 1008', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('ba871bd0-db57-5ed8-8ae5-1f68b7102032', 'ACC-1009', 'CUS-1009', 'Customer 1009', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('3a6dedd3-e457-5a0d-9ba6-48db240bbac0', 'ACC-1010', 'CUS-1010', 'Customer 1010', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('452f7633-48a4-50fe-a113-9b39f9933d35', 'ACC-1011', 'CUS-1011', 'Customer 1011', 'CUSTOMER', 'ACTIVE', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
-('bec25956-4d41-5468-80d4-d64788b99941', 'ACC-BLOCKED-9001', 'CUS-BLOCKED-001', 'Blocked Test Account', 'CUSTOMER', 'BLOCKED', 'INR', '2026-06-01 00:00:00', '2026-06-01 00:00:00');
+INSERT INTO accounts (id, account_number, customer_ref, display_name, account_type, status, default_currency, balance, created_at, updated_at) VALUES
+('aea7404c-1855-5578-90d7-fb391c76cc77', 'ACC-KISHORE-SAV-001', 'CUS-KISHORE-001', 'Kishore Savings', 'CUSTOMER', 'ACTIVE', 'INR', 500000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('26fb62f8-b2b8-5cf2-aa8c-41146f07e273', 'ACC-KISHORE-CUR-001', 'CUS-KISHORE-001', 'Kishore Current', 'CUSTOMER', 'ACTIVE', 'INR', 250000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('44e07227-7c21-5c6a-9037-4dcfe4201a0d', 'BND-INR-OPERATING-001', 'BND-BUSINESS', 'BND Operating Account', 'BUSINESS', 'ACTIVE', 'INR', 100000000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('21f142f2-0a2c-50c7-ac04-1df5413bcf63', 'ACC-1000', 'CUS-1000', 'Customer 1000', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('951ae6fb-e3ad-542c-98fb-cd984775b653', 'ACC-1001', 'CUS-1001', 'Customer 1001', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('ae35cbec-3095-5dbd-97c1-1d971c7c0fc2', 'ACC-1002', 'CUS-1002', 'Customer 1002', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('045b8d3f-71dd-5d13-b9ad-1b0f6b158ed5', 'ACC-1003', 'CUS-1003', 'Customer 1003', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('34fe314b-62e7-5ef3-bec2-8041a1fca9a8', 'ACC-1004', 'CUS-1004', 'Customer 1004', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('09b8555a-a503-57b6-bdbe-5645a194516e', 'ACC-1005', 'CUS-1005', 'Customer 1005', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('706a2b93-0429-5c92-881b-b40ff195e13e', 'ACC-1006', 'CUS-1006', 'Customer 1006', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('be0514b2-6609-5df6-a45e-29c647aaaeb0', 'ACC-1007', 'CUS-1007', 'Customer 1007', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('1196120b-8eed-5ec6-8fe4-214dc9800576', 'ACC-1008', 'CUS-1008', 'Customer 1008', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('ba871bd0-db57-5ed8-8ae5-1f68b7102032', 'ACC-1009', 'CUS-1009', 'Customer 1009', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('3a6dedd3-e457-5a0d-9ba6-48db240bbac0', 'ACC-1010', 'CUS-1010', 'Customer 1010', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('452f7633-48a4-50fe-a113-9b39f9933d35', 'ACC-1011', 'CUS-1011', 'Customer 1011', 'CUSTOMER', 'ACTIVE', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00'),
+('bec25956-4d41-5468-80d4-d64788b99941', 'ACC-BLOCKED-9001', 'CUS-BLOCKED-001', 'Blocked Test Account', 'CUSTOMER', 'BLOCKED', 'INR', 100000.00, '2026-06-01 00:00:00', '2026-06-01 00:00:00');
 
 INSERT INTO cards (id, customer_ref, card_brand, masked_pan, last4, expiry_month, expiry_year, cardholder_name, token_ref, status, created_at) VALUES
 ('cc9f44e1-b31c-568b-a03c-07e122f161ed', 'CUS-KISHORE-001', 'VISA', '**** **** **** 4242', '4242', 12, 2030, 'Kishore', 'tok_demo_card_4242', 'ACTIVE', '2026-06-01 00:00:00');

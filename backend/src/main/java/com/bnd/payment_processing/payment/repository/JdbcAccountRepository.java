@@ -30,6 +30,22 @@ public class JdbcAccountRepository implements AccountRepository {
         return results.stream().findFirst();
     }
 
+    @Override
+    public List<Account> findByCustomerRef(String customerRef) {
+        String sql = "SELECT * FROM accounts WHERE customer_ref = :customerRef ORDER BY account_number";
+        return jdbcTemplate.query(sql, new MapSqlParameterSource("customerRef", customerRef), this::mapRow);
+    }
+
+    @Override
+    public int adjustBalance(String accountNumber, java.math.BigDecimal delta) {
+        String sql = "UPDATE accounts SET balance = balance + :delta, updated_at = :now WHERE account_number = :accountNumber";
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("delta", delta)
+                .addValue("now", java.sql.Timestamp.from(java.time.Instant.now()))
+                .addValue("accountNumber", accountNumber);
+        return jdbcTemplate.update(sql, params);
+    }
+
     private Account mapRow(ResultSet rs, int rowNum) throws SQLException {
         Account a = new Account();
         a.setId(UUID.fromString(rs.getString("id")));
@@ -39,6 +55,7 @@ public class JdbcAccountRepository implements AccountRepository {
         a.setAccountType(AccountType.valueOf(rs.getString("account_type")));
         a.setStatus(AccountStatus.valueOf(rs.getString("status")));
         a.setDefaultCurrency(rs.getString("default_currency"));
+        a.setBalance(rs.getBigDecimal("balance"));
         a.setCreatedAt(rs.getTimestamp("created_at").toInstant());
         a.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
         return a;

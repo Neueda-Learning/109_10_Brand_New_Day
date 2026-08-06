@@ -284,6 +284,17 @@ public class PaymentServiceImpl implements PaymentService {
 
         paymentStatusHistoryRepository.insert(historyEntry);
 
+        // Balance ledger effect (added 2026-08-06): only when a payment/refund truly
+        // settles (COMPLETED) does real money move - debit the source, credit the
+        // destination, both by the frozen INR settlement amount. Never applied on
+        // CREATED/VALIDATED/SENT/FAILED. Works identically for PAYMENT and REFUND
+        // rows since a refund's source/destination are already swapped at creation.
+        if (nextStatus == PaymentStatus.COMPLETED) {
+            BigDecimal settled = current.getSettlementAmountInr() == null ? BigDecimal.ZERO : current.getSettlementAmountInr();
+            accountRepository.adjustBalance(current.getSourceAccount(), settled.negate());
+            accountRepository.adjustBalance(current.getDestinationAccount(), settled);
+        }
+
         Payment updated = paymentRepository.findById(id)
                 .orElseThrow(() -> new PaymentNotFoundException(id));
         return PaymentMapper.toResponse(updated);
