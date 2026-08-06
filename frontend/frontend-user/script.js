@@ -257,6 +257,10 @@
   }
 
   // --- My Accounts (universal GET /api/accounts?customerRef=) ---
+  // Balances are masked by default; clicking "View" reveals the real value for
+  // 10 seconds, then auto re-masks (each card independently).
+  var MASK_TEXT = "\u2022\u2022\u2022\u2022\u2022\u2022";
+  var REVEAL_MS = 10000;
 
   async function loadAccounts() {
     var result = await fetchJson(ACCOUNTS_API + "?customerRef=" + encodeURIComponent(CUSTOMER_REF));
@@ -272,8 +276,33 @@
         '<div class="card account-card">' +
         '<div class="account-label">' + escapeHtml(account.displayName) + '</div>' +
         '<div class="account-number small text-muted">' + escapeHtml(account.accountNumber) + '</div>' +
-        '<div class="account-balance">' + formatAmount(account.balance, account.currency) + '</div>' +
+        '<div class="d-flex align-items-center justify-content-center gap-2 mt-1">' +
+        '<div class="account-balance">' + MASK_TEXT + '</div>' +
+        '<button type="button" class="btn btn-sm btn-link p-0 balance-toggle" title="View balance"><i class="bi bi-eye"></i></button>' +
+        '</div>' +
         '</div>';
+
+      var balanceEl = col.querySelector(".account-balance");
+      var toggleBtn = col.querySelector(".balance-toggle");
+      var maskTimer = null;
+
+      toggleBtn.addEventListener("click", function () {
+        var isMasked = balanceEl.textContent === MASK_TEXT;
+        if (isMasked) {
+          balanceEl.textContent = formatAmount(account.balance, account.currency);
+          toggleBtn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+          clearTimeout(maskTimer);
+          maskTimer = setTimeout(function () {
+            balanceEl.textContent = MASK_TEXT;
+            toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
+          }, REVEAL_MS);
+        } else {
+          balanceEl.textContent = MASK_TEXT;
+          toggleBtn.innerHTML = '<i class="bi bi-eye"></i>';
+          clearTimeout(maskTimer);
+        }
+      });
+
       containerEl.appendChild(col);
     });
   }
@@ -617,4 +646,5 @@
     return data.message || data.error || JSON.stringify(data);
   }
 })();
+
 

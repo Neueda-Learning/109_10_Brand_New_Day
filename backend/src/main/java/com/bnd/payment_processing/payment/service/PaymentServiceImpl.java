@@ -5,6 +5,7 @@ import com.bnd.payment_processing.common.exception.AccountNotFoundException;
 import com.bnd.payment_processing.common.exception.CardDeclinedException;
 import com.bnd.payment_processing.common.exception.CardNotFoundException;
 import com.bnd.payment_processing.common.exception.DuplicatePaymentException;
+import com.bnd.payment_processing.common.exception.InsufficientFundsException;
 import com.bnd.payment_processing.common.exception.InvalidRefundStateException;
 import com.bnd.payment_processing.common.exception.InvalidStatusTransitionException;
 import com.bnd.payment_processing.common.exception.PaymentNotFoundException;
@@ -153,7 +154,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         // Bank-grade account checks (added 2026-08-06): both accounts must exist and
         // be ACTIVE before any payment row is written - see requireActiveAccount().
-        requireActiveAccount(request.getSourceAccount());
+        Account sourceAccountEntity = requireActiveAccount(request.getSourceAccount());
         requireActiveAccount(request.getDestinationAccount());
 
         Instant now = Instant.now();
@@ -188,6 +189,19 @@ public class PaymentServiceImpl implements PaymentService {
         // Multi-currency, settle-in-INR FX snapshot (added 2026-08-06) - frozen now,
         // never recomputed later.
         applySettlementSnapshot(payment, request.getCurrency(), request.getAmount());
+
+        // Bank-grade solvency guard (added 2026-08-06 hotfix): fail fast at creation
+        // time if the source account clearly can't afford this payment. This is a
+        // best-effort, point-in-time check (sourceAccountEntity.balance was read
+        // before this request started) - the AUTHORITATIVE, race-safe check is the
+        // atomic debitIfSufficient() re-verification at settlement time in
+        // processTransition() below, which is what actually prevents a negative
+        // balance even under concurrent payments.
+        if (sourceAccountEntity.getBalance() != null
+                && sourceAccountEntity.getBalance().compareTo(payment.getSettlementAmountInr()) < 0) {
+            throw new InsufficientFundsException(
+                    request.getSourceAccount(), payment.getSettlementAmountInr(), sourceAccountEntity.getBalance());
+        }
 
         payment.setCreatedAt(now);
         payment.setUpdatedAt(now);
@@ -251,6 +265,36 @@ public class PaymentServiceImpl implements PaymentService {
             errorCode = request.getErrorCode().trim();
         }
 
+        // Bank-grade settlement guards (added 2026-08-06 hotfix): a payment/refund
+        // only actually moves money when it reaches COMPLETED, so this is the one
+        // point where solvency/account-status MUST be re-verified atomically -
+        // checking once at creation time (as before this hotfix) is not enough,
+        // since balances/account status can change in between. If either guard
+        // fails, the transition is degraded to FAILED instead of completing, and no
+        // partial balance effect (e.g. debit without credit) is ever applied.
+        BigDecimal settled = current.getSettlementAmountInr() == null ? BigDecimal.ZERO : current.getSettlementAmountInr();
+        boolean creditDestination = false;
+        if (nextStatus == PaymentStatus.COMPLETED) {
+            boolean sourceStillActive = accountRepository.findByAccountNumber(current.getSourceAccount())
+                    .map(a -> a.getStatus() == AccountStatus.ACTIVE).orElse(false);
+            boolean destinationStillActive = accountRepository.findByAccountNumber(current.getDestinationAccount())
+                    .map(a -> a.getStatus() == AccountStatus.ACTIVE).orElse(false);
+
+            if (!sourceStillActive || !destinationStillActive) {
+                nextStatus = PaymentStatus.FAILED;
+                errorCode = "ACCOUNT_BLOCKED";
+            } else if (accountRepository.debitIfSufficient(current.getSourceAccount(), settled) == 0) {
+                // Atomic conditional debit failed -> insufficient funds at this exact
+                // moment (this is the real, race-safe guard - not just a read-then-write
+                // check). This is the fix for the bug where a payment could complete
+                // and drive an account balance negative.
+                nextStatus = PaymentStatus.FAILED;
+                errorCode = "INSUFFICIENT_FUNDS";
+            } else {
+                creditDestination = true;
+            }
+        }
+
         int rowsAffected = paymentRepository.updateStatusIfCurrent(
                 id,
                 current.getStatus().name(),
@@ -284,14 +328,9 @@ public class PaymentServiceImpl implements PaymentService {
 
         paymentStatusHistoryRepository.insert(historyEntry);
 
-        // Balance ledger effect (added 2026-08-06): only when a payment/refund truly
-        // settles (COMPLETED) does real money move - debit the source, credit the
-        // destination, both by the frozen INR settlement amount. Never applied on
-        // CREATED/VALIDATED/SENT/FAILED. Works identically for PAYMENT and REFUND
-        // rows since a refund's source/destination are already swapped at creation.
-        if (nextStatus == PaymentStatus.COMPLETED) {
-            BigDecimal settled = current.getSettlementAmountInr() == null ? BigDecimal.ZERO : current.getSettlementAmountInr();
-            accountRepository.adjustBalance(current.getSourceAccount(), settled.negate());
+        // Only credit the destination if the atomic debit above actually succeeded -
+        // never credit without a matching successful debit.
+        if (creditDestination) {
             accountRepository.adjustBalance(current.getDestinationAccount(), settled);
         }
 
@@ -410,7 +449,7 @@ public class PaymentServiceImpl implements PaymentService {
         // Bank-grade re-check (added 2026-08-06): an account can be blocked between
         // the original payment completing and the refund being requested - re-verify
         // both accounts (swapped for the refund direction) are still ACTIVE.
-        requireActiveAccount(original.getDestinationAccount());
+        Account refundSourceEntity = requireActiveAccount(original.getDestinationAccount());
         requireActiveAccount(original.getSourceAccount());
 
         Instant now = Instant.now();
@@ -447,6 +486,16 @@ public class PaymentServiceImpl implements PaymentService {
         refund.setCreatedAt(now);
         refund.setUpdatedAt(now);
 
+        // Bank-grade solvency guard (added 2026-08-06 hotfix): fail fast if the
+        // refunding account clearly can't afford it. Same caveat as createPayment()
+        // - this is best-effort/point-in-time; the authoritative atomic re-check is
+        // debitIfSufficient() in processTransition() at actual settlement time.
+        if (refundSourceEntity.getBalance() != null
+                && refundSourceEntity.getBalance().compareTo(refund.getSettlementAmountInr()) < 0) {
+            throw new InsufficientFundsException(
+                    refund.getSourceAccount(), refund.getSettlementAmountInr(), refundSourceEntity.getBalance());
+        }
+
         // Refund idempotency (spec.md Section 10.6, added 2026-08-05): mirrors the same
         // duplicate-key-catch-and-refetch short-circuit pattern used by createPayment(),
         // so a double-submitted refund request can't create two rows.
@@ -476,6 +525,15 @@ public class PaymentServiceImpl implements PaymentService {
     public PaymentResponse approveRefund(UUID refundId, ApproveRefundRequest request) {
         Payment refund = paymentRepository.findById(refundId)
                 .orElseThrow(() -> new PaymentNotFoundException(refundId));
+
+        // Segregation-of-duties (added 2026-08-06 hotfix): this check already existed
+        // on rejectRefund() but was missing here, meaning the requester of a refund
+        // could approve their own refund - defeating the whole point of the approval
+        // gate. Applied consistently with rejectRefund() below.
+        if (refund.getRequestedBy() != null && refund.getRequestedBy().equals(request.getApprovedBy())) {
+            throw new SegregationOfDutiesException(
+                    "approvedBy cannot be the same account that requested refund " + refundId);
+        }
 
         // Conditional update (spec.md Section 10.8, added 2026-08-05): only applies when
         // type=REFUND and approval_status=PENDING_APPROVAL. A 0-row result means the

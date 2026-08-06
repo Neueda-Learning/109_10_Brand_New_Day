@@ -27,5 +27,18 @@ public interface AccountRepository {
      * {@code SELECT ... FOR UPDATE}. Returns rows affected (0 if account not found).
      */
     int adjustBalance(String accountNumber, BigDecimal delta);
+
+    /**
+     * Bank-grade insufficient-funds guard (added 2026-08-06 hotfix): atomically
+     * debits {@code amount} from the account's balance ONLY if the current balance
+     * is sufficient, via a single {@code UPDATE ... SET balance = balance - :amount
+     * WHERE account_number = :accountNumber AND balance >= :amount}. This closes the
+     * race window a plain read-then-write check would leave open (two concurrent
+     * payments both reading a "sufficient" balance before either commits) and is the
+     * single source of truth for "can this payment settle" - not just the account
+     * existence/active-status check. Returns 1 if the debit was applied, 0 if the
+     * account doesn't exist OR the balance was insufficient.
+     */
+    int debitIfSufficient(String accountNumber, BigDecimal amount);
 }
 

@@ -47,7 +47,17 @@
   font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--color-primary);
-  margin-top: var(--space-1);
+  letter-spacing: 1px;
+}
+
+.balance-toggle {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  line-height: 1;
+}
+
+.balance-toggle:hover {
+  color: var(--color-primary);
 }
 
 /* --- Exchange rates chips --- */

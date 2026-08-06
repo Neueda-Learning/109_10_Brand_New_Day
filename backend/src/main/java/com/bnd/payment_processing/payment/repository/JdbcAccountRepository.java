@@ -46,6 +46,20 @@ public class JdbcAccountRepository implements AccountRepository {
         return jdbcTemplate.update(sql, params);
     }
 
+    @Override
+    public int debitIfSufficient(String accountNumber, java.math.BigDecimal amount) {
+        // Bank-grade hotfix (2026-08-06): the WHERE balance >= :amount clause makes
+        // the check-and-debit atomic in one statement, so a concurrent second debit
+        // against the same account cannot both pass a separate "read balance" check.
+        String sql = "UPDATE accounts SET balance = balance - :amount, updated_at = :now "
+                + "WHERE account_number = :accountNumber AND balance >= :amount";
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("amount", amount)
+                .addValue("now", java.sql.Timestamp.from(java.time.Instant.now()))
+                .addValue("accountNumber", accountNumber);
+        return jdbcTemplate.update(sql, params);
+    }
+
     private Account mapRow(ResultSet rs, int rowNum) throws SQLException {
         Account a = new Account();
         a.setId(UUID.fromString(rs.getString("id")));
