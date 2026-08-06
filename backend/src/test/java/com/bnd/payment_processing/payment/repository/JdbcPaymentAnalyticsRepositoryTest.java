@@ -98,10 +98,19 @@ class JdbcPaymentAnalyticsRepositoryTest {
     }
 
     @Test
-    void getInsights_pendingApprovalCount_isZeroUntilM3SchemaLands() {
+    void getInsights_pendingApprovalCount_matchesRealCountOfPendingRefunds() {
+        // Updated 2026-08-06: the M3 refund-approval schema has landed and
+        // JdbcPaymentAnalyticsRepository now runs a real COUNT(*) query (previously
+        // hardcoded to 0) - assert it matches an independent count rather than zero.
         PaymentInsightsResponse insights = paymentAnalyticsRepository.getInsights(new LinkedHashMap<>());
 
-        assertThat(insights.getPendingApprovalCount()).isZero();
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("type", "REFUND");
+        filters.put("approvalStatus", "PENDING_APPROVAL");
+        long expectedPending = paymentRepository.countSearch(filters);
+
+        assertThat(insights.getPendingApprovalCount()).isEqualTo(expectedPending);
+        assertThat(insights.getPendingApprovalCount()).isGreaterThanOrEqualTo(0L);
     }
 
     @Test
